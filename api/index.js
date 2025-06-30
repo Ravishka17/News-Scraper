@@ -17,24 +17,30 @@ module.exports = async (req, res) => {
     const $ = cheerio.load(data);
     const newsItems = [];
 
-    $('.news-item').each((i, element) => {
-      const topic = $(element).find('.title').text().trim();
-      const description = $(element).find('.summary').text().trim();
-      const imageUrl = $(element).find('.thumbnail').attr('src') || '';
+    // Try common selectors for news articles
+    $('article, .article, .news-item, .article-card, .post').each((i, element) => {
+      const topic = $(element).find('h2, h3, .title, .article-title, a').first().text().trim();
+      const description = $(element).find('p, .summary, .excerpt, .description').first().text().trim();
+      const imageUrl = $(element).find('img').attr('src') || $(element).find('img').attr('data-src') || '';
 
-      if (topic && description) {
+      if (topic) {
         newsItems.push({
           topic,
-          description,
+          description: description || 'No description available',
           image_url: imageUrl.startsWith('http') ? imageUrl : `https://sinhala.newsfirst.lk${imageUrl}`
         });
       }
     });
 
+    // Log for debugging
+    if (newsItems.length === 0) {
+      console.log('No news items found. HTML sample:', $('body').html().slice(0, 500));
+    }
+
     res.setHeader('Content-Type', 'application/json');
     res.status(200).json(newsItems);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to scrape news' });
+    console.error('Error:', error.message);
+    res.status(500).json({ error: 'Failed to scrape news', details: error.message });
   }
 };
