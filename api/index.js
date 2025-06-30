@@ -1,14 +1,34 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 
+// Helper function to fetch article description from individual page
+const fetchArticleDescription = async (articleUrl) => {
+  try {
+    const { data } = await axios.get(articleUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      },
+      timeout: 5000
+    });
+    
+    const $ = cheerio.load(data);
+    const metaDescription = $('meta[name="description"]').attr('content');
+    return metaDescription ? metaDescription.trim() : null;
+  } catch (error) {
+    console.log(`Failed to fetch description from ${articleUrl}: ${error.message}`);
+    return null;
+  }
+};
+
 module.exports = async (req, res) => {
   try {
     const type = req.query.type || 'latest';
+    const fetchDescriptions = req.query.descriptions === 'true'; // Add option to fetch full descriptions
     const url = type === 'local' 
       ? 'https://sinhala.newsfirst.lk/local' 
       : 'https://sinhala.newsfirst.lk/latest-news';
 
-    console.log(`Scraping URL: ${url}`);
+    console.log(`Scraping URL: ${url}, Fetch descriptions: ${fetchDescriptions}`);
 
     const { data } = await axios.get(url, {
       headers: {
@@ -76,19 +96,59 @@ module.exports = async (req, res) => {
           }
         }
 
-        // Try to find description
+        // Try to find description - improved approach
+        let description = '';
+        let articleUrl = '';
+        
+        // Check if this element contains a link to a full article
+        const articleLink = $element.find('a[href]').first();
+        if (articleLink.length) {
+          const href = articleLink.attr('href');
+          // If it's a relative link, make it absolute
+          articleUrl = href.startsWith('http') ? href : 
+                     href.startsWith('/') ? `https://sinhala.newsfirst.lk${href}` :
+                     `https://sinhala.newsfirst.lk/${href}`;
+        }
+        
+        // Try to find description in current element first
         const descSelectors = [
-          'p', '.summary', '.excerpt', '.description', '.content', '.text',
-          '.news-summary', '.article-summary', '.story-summary'
+          'p', '.summary', '.excerpt', '.description', '.content', '.text', '.lead',
+          '.news-summary', '.article-summary', '.story-summary', '.story-content',
+          '.article-content', '.news-content', '.post-content'
         ];
         
-        let description = '';
         for (const descSel of descSelectors) {
           const descEl = $element.find(descSel).first();
           if (descEl.length) {
-            description = descEl.text().trim();
-            if (description && description.length > 20) break; // Good description found
+            const text = descEl.text().trim();
+            // Make sure it's not just the title repeated
+            if (text && text.length > 20 && text !== topic) {
+              description = text;
+              break;
+            }
           }
+        }
+        
+        // If no description found, try to extract from all text in element
+        if (!description) {
+          const allText = $element.text().trim();
+          // Split by the title and take what comes after
+          const parts = allText.split(topic);
+          if (parts.length > 1) {
+            const afterTitle = parts[1].trim();
+            if (afterTitle.length > 20) {
+              description = afterTitle.substring(0, 300);
+            }
+          }
+        }
+        
+        // Clean up description
+        if (description) {
+          // Remove common prefixes and clean up
+          description = description
+            .replace(/^COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
+            .replace(/^[^\w]*/, '')
+            .trim();
         }
 
         // Try to find image
@@ -105,11 +165,14 @@ module.exports = async (req, res) => {
 
         // Only add if we have a meaningful title
         if (topic && topic.length > 5) {
-          newsItems.push({
+          const newsItem = {
             topic: topic.substring(0, 200), // Limit title length
-            description: description ? description.substring(0, 300) : 'No description available',
-            image_url: imageUrl || ''
-          });
+            description: description || 'No description available',
+            image_url: imageUrl || '',
+            article_url: articleUrl || ''
+          };
+          
+          newsItems.push(newsItem);
         }
       });
 
@@ -161,6 +224,32 @@ module.exports = async (req, res) => {
     const uniqueItems = newsItems.filter((item, index, self) => 
       index === self.findIndex(i => i.topic === item.topic)
     );
+
+    // If requested and we have article URLs, fetch full descriptions
+    if (fetchDescriptions && uniqueItems.length > 0) {
+      console.log('Fetching full descriptions for articles...');
+      
+      const promises = uniqueItems.slice(0, 5).map(async (item) => { // Limit to first 5 to avoid timeout
+        if (item.article_url && item.description === 'No description available') {
+          const fullDescription = await fetchArticleDescription(item.article_url);
+          if (fullDescription) {
+            item.description = fullDescription.substring(0, 400);
+          }
+        }
+        return item;
+      });
+      
+      const itemsWithDescriptions = await Promise.all(promises);
+      // Add remaining items without fetching their descriptions
+      const finalItems = [...itemsWithDescriptions, ...uniqueItems.slice(5)];
+      
+      console.log(`Fetched descriptions for ${itemsWithDescriptions.filter(item => item.description !== 'No description available').length} articles`);
+      
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.status(200).json(finalItems);
+      return;
+    }
 
     console.log(`Final result: ${uniqueItems.length} unique news items`);
 
