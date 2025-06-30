@@ -8,23 +8,12 @@ const fetchArticleDescription = async (articleUrl) => {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       },
-      timeout: 8000
+      timeout: 5000
     });
     
     const $ = cheerio.load(data);
     const metaDescription = $('meta[name="description"]').attr('content');
-    
-    if (metaDescription && metaDescription.trim().length > 20) {
-      // Clean up the meta description
-      let cleanDesc = metaDescription.trim()
-        .replace(/^COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
-        .replace(/\s*-\s*ශ්‍රී\s*ලංකා\s*ප්‍රවෘත්ති.*$/i, '')
-        .trim();
-      
-      return cleanDesc;
-    }
-    
-    return null;
+    return metaDescription ? metaDescription.trim() : null;
   } catch (error) {
     console.log(`Failed to fetch description from ${articleUrl}: ${error.message}`);
     return null;
@@ -34,7 +23,7 @@ const fetchArticleDescription = async (articleUrl) => {
 module.exports = async (req, res) => {
   try {
     const type = req.query.type || 'latest';
-    const fetchDescriptions = req.query.descriptions === 'true';
+    const fetchDescriptions = req.query.descriptions === 'true'; // Add option to fetch full descriptions
     const url = type === 'local' 
       ? 'https://sinhala.newsfirst.lk/local' 
       : 'https://sinhala.newsfirst.lk/latest-news';
@@ -50,127 +39,171 @@ module.exports = async (req, res) => {
         'Connection': 'keep-alive',
         'Upgrade-Insecure-Requests': '1'
       },
-      timeout: 15000
+      timeout: 10000
     });
 
     const $ = cheerio.load(data);
     const newsItems = [];
 
-    // First, try to find the main news container
-    let foundItems = false;
-    const containerSelectors = [
-      '.news-list',
-      '.article-list', 
-      '.posts-list',
-      '.content-list',
-      '.main-content',
-      '#main-content',
-      '.container'
+    // More comprehensive selectors for news items
+    const selectors = [
+      // Common news article selectors
+      '.news-item',
+      '.article-item',
+      '.post-item',
+      '.news-card',
+      '.article-card',
+      '.story-item',
+      '.content-item',
+      // Generic article and div selectors
+      'article',
+      '.article',
+      '.post',
+      '.story',
+      '.content',
+      // List item selectors
+      'li[class*="news"]',
+      'li[class*="article"]',
+      'li[class*="post"]',
+      // Div selectors with common patterns
+      'div[class*="news"]',
+      'div[class*="article"]',
+      'div[class*="post"]',
+      'div[class*="story"]',
+      'div[class*="item"]'
     ];
 
-    for (const containerSel of containerSelectors) {
-      const container = $(containerSel);
-      if (container.length) {
-        console.log(`Trying container: ${containerSel}`);
+    // Try each selector until we find news items
+    for (const selector of selectors) {
+      $(selector).each((i, element) => {
+        if (newsItems.length >= 20) return false; // Limit to 20 items
+
+        const $element = $(element);
         
-        // Look for individual news items within this container
-        container.find('article, .article, .news-item, .post, div[class*="item"]').each((i, element) => {
-          if (newsItems.length >= 15) return false;
-          
-          const $element = $(element);
-          
-          // Extract title - be more specific about what constitutes a good title
-          let topic = '';
-          const titleElements = $element.find('h1, h2, h3, h4, h5, a[title]');
-          
-          titleElements.each((j, titleEl) => {
-            const $titleEl = $(titleEl);
-            const titleText = $titleEl.attr('title') || $titleEl.text().trim();
-            
-            // Check if this looks like a proper news title
-            if (titleText && 
-                titleText.length > 10 && 
-                titleText.length < 200 &&
-                !titleText.match(/^\d{2}-\d{2}-\d{4}/) && // Not a date
-                !titleText.includes('වැඩි විස්තර') && // Not "more details"
-                !titleText.match(/^(AM|PM)$/)) { // Not time indicators
-              
-              topic = titleText;
-              return false; // Break the loop
-            }
-          });
-          
-          if (!topic) return; // Skip if no good title found
-          
-          // Extract article URL
-          let articleUrl = '';
-          const linkEl = $element.find('a[href]').first();
-          if (linkEl.length) {
-            const href = linkEl.attr('href');
-            if (href) {
-              articleUrl = href.startsWith('http') ? href : 
-                         href.startsWith('/') ? `https://sinhala.newsfirst.lk${href}` :
-                         `https://sinhala.newsfirst.lk/${href}`;
+        // Try multiple ways to get the title/topic
+        const titleSelectors = [
+          'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+          '.title', '.headline', '.news-title', '.article-title', '.story-title',
+          'a[title]', 'a'
+        ];
+        
+        let topic = '';
+        for (const titleSel of titleSelectors) {
+          const titleEl = $element.find(titleSel).first();
+          if (titleEl.length) {
+            topic = titleEl.attr('title') || titleEl.text().trim();
+            if (topic && topic.length > 10) break; // Good title found
+          }
+        }
+
+        // Try to find description - improved approach
+        let description = '';
+        let articleUrl = '';
+        
+        // Check if this element contains a link to a full article
+        const articleLink = $element.find('a[href]').first();
+        if (articleLink.length) {
+          const href = articleLink.attr('href');
+          // If it's a relative link, make it absolute
+          articleUrl = href.startsWith('http') ? href : 
+                     href.startsWith('/') ? `https://sinhala.newsfirst.lk${href}` :
+                     `https://sinhala.newsfirst.lk/${href}`;
+        }
+        
+        // Try to find description in current element first
+        const descSelectors = [
+          'p', '.summary', '.excerpt', '.description', '.content', '.text', '.lead',
+          '.news-summary', '.article-summary', '.story-summary', '.story-content',
+          '.article-content', '.news-content', '.post-content'
+        ];
+        
+        for (const descSel of descSelectors) {
+          const descEl = $element.find(descSel).first();
+          if (descEl.length) {
+            const text = descEl.text().trim();
+            // Make sure it's not just the title repeated
+            if (text && text.length > 20 && text !== topic) {
+              description = text;
+              break;
             }
           }
-          
-          // Extract image
-          let imageUrl = '';
-          const imgEl = $element.find('img').first();
-          if (imgEl.length) {
-            imageUrl = imgEl.attr('src') || imgEl.attr('data-src') || imgEl.attr('data-lazy-src') || '';
-            if (imageUrl && !imageUrl.startsWith('http') && !imageUrl.startsWith('data:')) {
-              imageUrl = imageUrl.startsWith('/') 
-                ? `https://sinhala.newsfirst.lk${imageUrl}`
-                : `https://sinhala.newsfirst.lk/${imageUrl}`;
+        }
+        
+        // If no description found, try to extract from all text in element
+        if (!description) {
+          const allText = $element.text().trim();
+          // Split by the title and take what comes after
+          const parts = allText.split(topic);
+          if (parts.length > 1) {
+            const afterTitle = parts[1].trim();
+            if (afterTitle.length > 20) {
+              description = afterTitle.substring(0, 300);
             }
           }
-          
-          // For now, don't try to extract description from listing page
-          // as it's getting mixed up with other content
-          
-          newsItems.push({
-            topic: topic.substring(0, 200),
-            description: 'No description available',
+        }
+        
+        // Clean up description
+        if (description) {
+          // Remove common prefixes and clean up
+          description = description
+            .replace(/^COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
+            .replace(/^[^\w]*/, '')
+            .trim();
+        }
+
+        // Try to find image
+        const img = $element.find('img').first();
+        let imageUrl = '';
+        if (img.length) {
+          imageUrl = img.attr('src') || img.attr('data-src') || img.attr('data-lazy-src') || '';
+          if (imageUrl && !imageUrl.startsWith('http') && !imageUrl.startsWith('data:')) {
+            imageUrl = imageUrl.startsWith('/') 
+              ? `https://sinhala.newsfirst.lk${imageUrl}`
+              : `https://sinhala.newsfirst.lk/${imageUrl}`;
+          }
+        }
+
+        // Only add if we have a meaningful title
+        if (topic && topic.length > 5) {
+          const newsItem = {
+            topic: topic.substring(0, 200), // Limit title length
+            description: description || 'No description available',
             image_url: imageUrl || '',
             article_url: articleUrl || ''
-          });
-        });
-        
-        if (newsItems.length > 0) {
-          foundItems = true;
-          break;
+          };
+          
+          newsItems.push(newsItem);
         }
+      });
+
+      // If we found items with this selector, break
+      if (newsItems.length > 0) {
+        console.log(`Found ${newsItems.length} items using selector: ${selector}`);
+        break;
       }
     }
 
-    // If no items found with container approach, try direct selection
-    if (!foundItems) {
-      console.log('No items found in containers, trying direct selection...');
+    // If still no items found, try a more aggressive approach
+    if (newsItems.length === 0) {
+      console.log('No items found with standard selectors, trying aggressive approach...');
       
-      // Look for links that seem to point to news articles
-      $('a[href*="/2025/"]').each((i, element) => {
-        if (newsItems.length >= 15) return false;
+      // Look for any elements with text that might be news titles
+      $('a, h1, h2, h3, h4, h5, h6, .title, [class*="title"], [class*="headline"]').each((i, element) => {
+        if (newsItems.length >= 10) return false;
         
         const $element = $(element);
-        const href = $element.attr('href');
-        const title = $element.attr('title') || $element.text().trim();
+        const text = $element.text().trim();
         
-        // Check if this looks like a news article link
-        if (title && 
-            title.length > 15 && 
-            title.length < 200 &&
-            href && 
-            href.includes('/2025/') &&
-            !title.includes('වැඩි විස්තර')) {
-          
-          // Get the parent element to look for image
-          const $parent = $element.closest('div, article, li');
-          const imgEl = $parent.find('img').first();
+        // Check if this looks like a news title (has some length and common patterns)
+        if (text.length > 15 && text.length < 200) {
+          // Look for parent container for more info
+          const $parent = $element.closest('div, article, li, section');
+          const description = $parent.find('p').first().text().trim();
+          const img = $parent.find('img').first();
           let imageUrl = '';
           
-          if (imgEl.length) {
-            imageUrl = imgEl.attr('src') || imgEl.attr('data-src') || '';
+          if (img.length) {
+            imageUrl = img.attr('src') || img.attr('data-src') || '';
             if (imageUrl && !imageUrl.startsWith('http')) {
               imageUrl = imageUrl.startsWith('/') 
                 ? `https://sinhala.newsfirst.lk${imageUrl}`
@@ -178,82 +211,64 @@ module.exports = async (req, res) => {
             }
           }
           
-          const articleUrl = href.startsWith('http') ? href : `https://sinhala.newsfirst.lk${href}`;
-          
           newsItems.push({
-            topic: title.substring(0, 200),
-            description: 'No description available',
-            image_url: imageUrl || '',
-            article_url: articleUrl
+            topic: text,
+            description: description || 'No description available',
+            image_url: imageUrl || ''
           });
         }
       });
     }
 
-    // Remove duplicates
+    // Remove duplicates based on topic
     const uniqueItems = newsItems.filter((item, index, self) => 
       index === self.findIndex(i => i.topic === item.topic)
     );
 
-    console.log(`Found ${uniqueItems.length} unique news items`);
-
-    // If requested, fetch full descriptions from individual pages
+    // If requested and we have article URLs, fetch full descriptions
     if (fetchDescriptions && uniqueItems.length > 0) {
-      console.log('Fetching full descriptions...');
+      console.log('Fetching full descriptions for articles...');
       
-      // Fetch descriptions for all items, but limit concurrent requests
-      const batchSize = 3;
-      const results = [];
-      
-      for (let i = 0; i < uniqueItems.length; i += batchSize) {
-        const batch = uniqueItems.slice(i, i + batchSize);
-        
-        const batchPromises = batch.map(async (item) => {
-          if (item.article_url) {
-            const description = await fetchArticleDescription(item.article_url);
-            return {
-              ...item,
-              description: description || 'No description available'
-            };
+      const promises = uniqueItems.slice(0, 5).map(async (item) => { // Limit to first 5 to avoid timeout
+        if (item.article_url && item.description === 'No description available') {
+          const fullDescription = await fetchArticleDescription(item.article_url);
+          if (fullDescription) {
+            item.description = fullDescription.substring(0, 400);
           }
-          return item;
-        });
-        
-        const batchResults = await Promise.all(batchPromises);
-        results.push(...batchResults);
-        
-        // Small delay between batches to be respectful
-        if (i + batchSize < uniqueItems.length) {
-          await new Promise(resolve => setTimeout(resolve, 500));
         }
-      }
+        return item;
+      });
       
-      const itemsWithDescriptions = results.filter(item => item.description !== 'No description available');
-      console.log(`Successfully fetched descriptions for ${itemsWithDescriptions.length} out of ${uniqueItems.length} articles`);
+      const itemsWithDescriptions = await Promise.all(promises);
+      // Add remaining items without fetching their descriptions
+      const finalItems = [...itemsWithDescriptions, ...uniqueItems.slice(5)];
+      
+      console.log(`Fetched descriptions for ${itemsWithDescriptions.filter(item => item.description !== 'No description available').length} articles`);
       
       res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Cache-Control', 'public, max-age=600'); // Cache for 10 minutes
-      res.status(200).json(results);
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.status(200).json(finalItems);
       return;
     }
 
-    // Return items without descriptions if not requested
+    console.log(`Final result: ${uniqueItems.length} unique news items`);
+
+    // If still no items, log some debugging info
     if (uniqueItems.length === 0) {
       console.log('No news items found. Debugging info:');
       console.log('Page title:', $('title').text());
       console.log('Number of links:', $('a').length);
-      console.log('Number of 2025 links:', $('a[href*="/2025/"]').length);
+      console.log('Number of images:', $('img').length);
+      console.log('Sample HTML structure:', $('body').children().first().prop('tagName'));
       
+      // Return some basic page info for debugging
       res.status(200).json({
         error: 'No news items found',
         debug: {
           pageTitle: $('title').text(),
           linksCount: $('a').length,
-          links2025Count: $('a[href*="/2025/"]').length,
-          sampleLinks: $('a[href*="/2025/"]').slice(0, 5).map((i, el) => ({
-            href: $(el).attr('href'),
-            text: $(el).text().trim().substring(0, 50)
-          })).get()
+          imagesCount: $('img').length,
+          bodyStructure: $('body').children().map((i, el) => $(el).prop('tagName')).get().slice(0, 10)
         }
       });
       return;
