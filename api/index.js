@@ -13,8 +13,8 @@ const fetchArticleDescription = async (articleUrl) => {
     
     const $ = cheerio.load(data);
     // Extract description from article body paragraphs
-    const paragraphs = $('.article-body, .content, .post-content, p')
-      .not('.read-more, a, button, .button, [class*="more"], [class*="button"]')
+    const paragraphs = $('div[class*="content"], div[class*="article"], div[class*="post"], p')
+      .not('.read-more, a, button, .button, [class*="more"], [class*="button"], [class*="advert"], [class*="footer"]')
       .map((i, el) => $(el).text().trim())
       .get()
       .filter(text => text && 
@@ -22,11 +22,12 @@ const fetchArticleDescription = async (articleUrl) => {
         !text.includes('COLOMBO (News1st)') && 
         !text.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති') && 
         !text.includes('වැඩි විස්තර කියවන්න') && 
+        !text.includes('අදාල නිවේදනය පහතින් දැක්වේ') && // Exclude placeholder text
         !text.match(/^\d{1,2}-\d{1,2}-\d{4}/));
-    let description = paragraphs.join(' ').substring(0, 2000); // Increased limit for full content
+    let description = paragraphs.join(' ').trim();
     
     // Extract additional images from article body
-    const additionalImages = $('.article-body, .content, .post-content')
+    const additionalImages = $('div[class*="content"], div[class*="article"], div[class*="post"]')
       .find('img')
       .map((i, el) => {
         let src = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src') || '';
@@ -36,18 +37,17 @@ const fetchArticleDescription = async (articleUrl) => {
         return src;
       })
       .get()
-      .filter(src => src && src !== ''); // Remove empty or invalid URLs
+      .filter(src => src && src !== '' && !src.includes('_200x120') && !src.includes('_550x300') && !src.includes('_650x250') && !src.includes('_850x460')); // Exclude thumbnails
     
-    // Fallback to meta description if no paragraphs found, but clean it
-    if (!description) {
-      description = $('meta[name="description"]').attr('content')?.trim() || '';
-      if (description.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති') || description.includes('වැඩි විස්තර කියවන්න')) {
-        description = '';
-      }
+    // If description is short and images exist, indicate image-based content
+    if (!description || description.length < 50) {
+      description = additionalImages.length > 0 
+        ? 'Main content is in the document image. See additional_images for details.'
+        : 'No description available';
     }
     
     return {
-      description: description || 'No description available',
+      description: description,
       additional_images: additionalImages
     };
   } catch (error) {
@@ -130,13 +130,14 @@ module.exports = async (req, res) => {
         ];
         
         for (const descSel of descSelectors) {
-          const descEl = $element.find(descSel).not(':has(h1, h2, h3, h4, h5, h6, a.read-more, button, .button, [class*="more"])').first();
+          const descEl = $element.find(descSel).not(':has(h1, h2, h3, h4, h5, h6, a.read-more, button, .button, [class*="more"], [class*="advert"])').first();
           if (descEl.length) {
             const text = descEl.text().trim();
             if (text && text.length > 20 && text !== topic && 
                 !text.includes('COLOMBO (News1st)') && 
                 !text.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති') && 
-                !text.includes('වැඩි විස්තර කියවන්න')) {
+                !text.includes('වැඩි විස්තර කියවන්න') && 
+                !text.includes('අදාල නිවේදනය පහතින් දැක්වේ')) {
               description = text;
               break;
             }
@@ -153,9 +154,10 @@ module.exports = async (req, res) => {
               afterTitle = afterTitle.replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
                                     .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
                                     .replace(/වැඩි විස්තර කියවන්න.*$/, '')
+                                    .replace(/අදාල නිවේදනය පහතින් දැක්වේ.*$/, '')
                                     .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '');
               if (afterTitle.length > 20) {
-                description = afterTitle.substring(0, 300);
+                description = afterTitle;
               }
             }
           }
@@ -167,6 +169,7 @@ module.exports = async (req, res) => {
             .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
             .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
             .replace(/වැඩි විස්තර කියවන්න.*$/, '')
+            .replace(/අදාල නිවේදනය පහතින් දැක්වේ.*$/, '')
             .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
             .replace(/\s+/g, ' ')
             .trim();
@@ -214,13 +217,14 @@ module.exports = async (req, res) => {
         
         if (text.length > 15 && text.length < 200) {
           const $parent = $element.closest('div, article, li, section');
-          let description = $parent.find('p').not('.read-more, a, button, .button, [class*="more"]').first().text().trim();
+          let description = $parent.find('p').not('.read-more, a, button, .button, [class*="more"], [class*="advert"]').first().text().trim();
           
           if (description) {
             description = description
               .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
-              .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
+              .replace(/ශ්‍රී ඲ංකා ප්‍රවෘත්ති.*$/, '')
               .replace(/වැඩි විස්තර කියවන්න.*$/, '')
+              .replace(/අදාල නිවේදනය පහතින් දැක්වේ.*$/, '')
               .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
               .replace(/\s+/g, ' ')
               .trim();
@@ -260,24 +264,23 @@ module.exports = async (req, res) => {
     // Fetch full descriptions and additional images from article pages
     console.log('Fetching full descriptions and images for articles...');
     
-    const promises = uniqueItems.slice(0, 5).map(async (item, index) => {
+    const promises = uniqueItems.map(async (item, index) => {
       if (item.article_url) {
         await new Promise(resolve => setTimeout(resolve, index * 1000)); // Delay to avoid rate-limiting
         const { description, additional_images } = await fetchArticleDescription(item.article_url);
-        item.description = description.substring(0, 2000);
+        item.description = description;
         item.additional_images = additional_images;
       }
       return item;
     });
     
     const itemsWithDescriptions = await Promise.all(promises);
-    const finalItems = [...itemsWithDescriptions, ...uniqueItems.slice(5)];
     
     console.log(`Fetched descriptions for ${itemsWithDescriptions.filter(item => item.description !== 'No description available').length} articles`);
     
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'public, max-age=300');
-    res.status(200).json(finalItems);
+    res.status(200).json(itemsWithDescriptions);
 
   } catch (error) {
     console.error('Scraping error:', error.message);
