@@ -1,7 +1,7 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 
-// Helper function to fetch article description from individual page
+// Helper function to fetch full article description
 const fetchArticleDescription = async (articleUrl) => {
   try {
     const { data } = await axios.get(articleUrl, {
@@ -12,22 +12,24 @@ const fetchArticleDescription = async (articleUrl) => {
     });
     
     const $ = cheerio.load(data);
-    // Extract from article body paragraphs, excluding bylines
-    const paragraphs = $('.article-body, .content, p')
+    // Extract from article body paragraphs, excluding unwanted elements
+    const paragraphs = $('.article-body, .content, .post-content, p')
+      .not('.read-more, a, button, .button, [class*="more"], [class*="button"]') // Exclude buttons/links
       .map((i, el) => $(el).text().trim())
       .get()
       .filter(text => text && 
         text.length > 20 && 
         !text.includes('COLOMBO (News1st)') && 
-        !text.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති') && // Exclude meta description text
+        !text.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති') && 
+        !text.includes('වැඩි විස්තර කියවන්න') && // Exclude "Read More"
         !text.match(/^\d{1,2}-\d{1,2}-\d{4}/)); // Exclude timestamps
-    let description = paragraphs.join(' ').substring(0, 400);
+    let description = paragraphs.join(' ').substring(0, 1000); // Increased limit for fuller content
     
     // Fallback to meta description if no paragraphs found, but clean it
     if (!description) {
       description = $('meta[name="description"]').attr('content')?.trim() || '';
-      if (description.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති')) {
-        description = ''; // Discard generic meta description
+      if (description.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති') || description.includes('වැඩි විස්තර කියවන්න')) {
+        description = ''; // Discard generic meta description or button text
       }
     }
     
@@ -113,19 +115,20 @@ module.exports = async (req, res) => {
         ];
         
         for (const descSel of descSelectors) {
-          const descEl = $element.find(descSel).not(':has(h1, h2, h3, h4, h5, h6)').first();
+          const descEl = $element.find(descSel).not(':has(h1, h2, h3, h4, h5, h6, a.read-more, button, .button, [class*="more"])').first();
           if (descEl.length) {
             const text = descEl.text().trim();
             if (text && text.length > 20 && text !== topic && 
                 !text.includes('COLOMBO (News1st)') && 
-                !text.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති')) {
+                !text.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති') && 
+                !text.includes('වැඩි විස්තර කියවන්න')) {
               description = text;
               break;
             }
           }
         }
 
-        // Fallback: Extract text after title, excluding bylines
+        // Fallback: Extract text after title, excluding bylines and buttons
         if (!description) {
           const allText = $element.text().trim();
           const parts = allText.split(topic);
@@ -134,7 +137,8 @@ module.exports = async (req, res) => {
             if (afterTitle && afterTitle.length > 20) {
               afterTitle = afterTitle.replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
                                     .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
-                                    .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, ''); // Remove timestamps
+                                    .replace(/වැඩි විස්තර කියවන්න.*$/, '') // Exclude "Read More"
+                                    .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '');
               if (afterTitle.length > 20) {
                 description = afterTitle.substring(0, 300);
               }
@@ -147,6 +151,7 @@ module.exports = async (req, res) => {
           description = description
             .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
             .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
+            .replace(/වැඩි විස්තර කියවන්න.*$/, '')
             .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
             .replace(/\s+/g, ' ')
             .trim();
@@ -193,12 +198,13 @@ module.exports = async (req, res) => {
         
         if (text.length > 15 && text.length < 200) {
           const $parent = $element.closest('div, article, li, section');
-          let description = $parent.find('p').first().text().trim();
+          let description = $parent.find('p').not('.read-more, a, button, .button, [class*="more"]').first().text().trim();
           
           if (description) {
             description = description
               .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
               .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
+              .replace(/වැඩි විස්තර කියවන්න.*$/, '')
               .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
               .replace(/\s+/g, ' ')
               .trim();
@@ -234,55 +240,26 @@ module.exports = async (req, res) => {
       index === self.findIndex(i => i.topic === item.topic)
     );
 
-    // Fetch descriptions from article pages if needed
-    if (fetchDescriptions || uniqueItems.some(item => !item.description || item.description === 'No description available' || item.description.length < 50)) {
-      console.log('Fetching full descriptions for articles...');
-      
-      const promises = uniqueItems.slice(0, 5).map(async (item, index) => {
-        if (item.article_url && (!item.description || item.description === 'No description available' || item.description.length < 50)) {
-          await new Promise(resolve => setTimeout(resolve, index * 1000)); // Delay to avoid rate-limiting
-          const fullDescription = await fetchArticleDescription(item.article_url);
-          item.description = fullDescription.substring(0, 400);
-        }
-        return item;
-      });
-      
-      const itemsWithDescriptions = await Promise.all(promises);
-      const finalItems = [...itemsWithDescriptions, ...uniqueItems.slice(5)];
-      
-      console.log(`Fetched descriptions for ${itemsWithDescriptions.filter(item => item.description !== 'No description available').length} articles`);
-      
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Cache-Control', 'public, max-age=300');
-      res.status(200).json(finalItems);
-      return;
-    }
-
-    console.log(`Final result: ${uniqueItems.length} unique news items`);
-
-    // If no items found, return debugging info
-    if (uniqueItems.length === 0) {
-      console.log('No news items found. Debugging info:');
-      console.log('Page title:', $('title').text());
-      console.log('Number of links:', $('a').length);
-      console.log('Number of images:', $('img').length);
-      console.log('Sample HTML structure:', $('body').children().first().prop('tagName'));
-      
-      res.status(200).json({
-        error: 'No news items found',
-        debug: {
-          pageTitle: $('title').text(),
-          linksCount: $('a').length,
-          imagesCount: $('img').length,
-          bodyStructure: $('body').children().map((i, el) => $(el).prop('tagName')).get().slice(0, 10)
-        }
-      });
-      return;
-    }
-
+    // Fetch full descriptions from article pages
+    console.log('Fetching full descriptions for articles...');
+    
+    const promises = uniqueItems.slice(0, 5).map(async (item, index) => {
+      if (item.article_url) {
+        await new Promise(resolve => setTimeout(resolve, index * 1000)); // Delay to avoid rate-limiting
+        const fullDescription = await fetchArticleDescription(item.article_url);
+        item.description = fullDescription.substring(0, 1000);
+      }
+      return item;
+    });
+    
+    const itemsWithDescriptions = await Promise.all(promises);
+    const finalItems = [...itemsWithDescriptions, ...uniqueItems.slice(5)];
+    
+    console.log(`Fetched descriptions for ${itemsWithDescriptions.filter(item => item.description !== 'No description available').length} articles`);
+    
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'public, max-age=300');
-    res.status(200).json(uniqueItems);
+    res.status(200).json(finalItems);
 
   } catch (error) {
     console.error('Scraping error:', error.message);
