@@ -1,7 +1,7 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 
-// Helper function to fetch full article description
+// Helper function to fetch full article description and additional images
 const fetchArticleDescription = async (articleUrl) => {
   try {
     const { data } = await axios.get(articleUrl, {
@@ -12,43 +12,58 @@ const fetchArticleDescription = async (articleUrl) => {
     });
     
     const $ = cheerio.load(data);
-    // Extract from article body paragraphs, excluding unwanted elements
+    // Extract description from article body paragraphs
     const paragraphs = $('.article-body, .content, .post-content, p')
-      .not('.read-more, a, button, .button, [class*="more"], [class*="button"]') // Exclude buttons/links
+      .not('.read-more, a, button, .button, [class*="more"], [class*="button"]')
       .map((i, el) => $(el).text().trim())
       .get()
       .filter(text => text && 
         text.length > 20 && 
         !text.includes('COLOMBO (News1st)') && 
         !text.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති') && 
-        !text.includes('වැඩි විස්තර කියවන්න') && // Exclude "Read More"
-        !text.match(/^\d{1,2}-\d{1,2}-\d{4}/)); // Exclude timestamps
-    let description = paragraphs.join(' ').substring(0, 1000); // Increased limit for fuller content
+        !text.includes('වැඩි විස්තර කියවන්න') && 
+        !text.match(/^\d{1,2}-\d{1,2}-\d{4}/));
+    let description = paragraphs.join(' ').substring(0, 2000); // Increased limit for full content
+    
+    // Extract additional images from article body
+    const additionalImages = $('.article-body, .content, .post-content')
+      .find('img')
+      .map((i, el) => {
+        let src = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src') || '';
+        if (src && !src.startsWith('http') && !src.startsWith('data:')) {
+          src = src.startsWith('/') ? `https://sinhala.newsfirst.lk${src}` : `https://sinhala.newsfirst.lk/${src}`;
+        }
+        return src;
+      })
+      .get()
+      .filter(src => src && src !== ''); // Remove empty or invalid URLs
     
     // Fallback to meta description if no paragraphs found, but clean it
     if (!description) {
       description = $('meta[name="description"]').attr('content')?.trim() || '';
       if (description.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති') || description.includes('වැඩි විස්තර කියවන්න')) {
-        description = ''; // Discard generic meta description or button text
+        description = '';
       }
     }
     
-    return description || 'No description available';
+    return {
+      description: description || 'No description available',
+      additional_images: additionalImages
+    };
   } catch (error) {
     console.log(`Failed to fetch description from ${articleUrl}: ${error.message}`);
-    return 'No description available';
+    return { description: 'No description available', additional_images: [] };
   }
 };
 
 module.exports = async (req, res) => {
   try {
     const type = req.query.type || 'latest';
-    const fetchDescriptions = req.query.descriptions === 'true'; // Optional flag for full descriptions
     const url = type === 'local' 
       ? 'https://sinhala.newsfirst.lk/local' 
       : 'https://sinhala.newsfirst.lk/latest-news';
 
-    console.log(`Scraping URL: ${url}, Fetch descriptions: ${fetchDescriptions}`);
+    console.log(`Scraping URL: ${url}`);
 
     const { data } = await axios.get(url, {
       headers: {
@@ -128,7 +143,7 @@ module.exports = async (req, res) => {
           }
         }
 
-        // Fallback: Extract text after title, excluding bylines and buttons
+        // Fallback: Extract text after title
         if (!description) {
           const allText = $element.text().trim();
           const parts = allText.split(topic);
@@ -137,7 +152,7 @@ module.exports = async (req, res) => {
             if (afterTitle && afterTitle.length > 20) {
               afterTitle = afterTitle.replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
                                     .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
-                                    .replace(/වැඩි විස්තර කියවන්න.*$/, '') // Exclude "Read More"
+                                    .replace(/වැඩි විස්තර කියවන්න.*$/, '')
                                     .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '');
               if (afterTitle.length > 20) {
                 description = afterTitle.substring(0, 300);
@@ -157,7 +172,7 @@ module.exports = async (req, res) => {
             .trim();
         }
 
-        // Extract image
+        // Extract primary image
         const img = $element.find('img').first();
         let imageUrl = '';
         if (img.length) {
@@ -175,7 +190,8 @@ module.exports = async (req, res) => {
             topic: topic.substring(0, 200),
             description: description || 'No description available',
             image_url: imageUrl || '',
-            article_url: articleUrl || ''
+            article_url: articleUrl || '',
+            additional_images: []
           });
         }
       });
@@ -229,7 +245,8 @@ module.exports = async (req, res) => {
             topic: text,
             description: description || 'No description available',
             image_url: imageUrl || '',
-            article_url: articleUrl || ''
+            article_url: articleUrl || '',
+            additional_images: []
           });
         }
       });
@@ -240,14 +257,15 @@ module.exports = async (req, res) => {
       index === self.findIndex(i => i.topic === item.topic)
     );
 
-    // Fetch full descriptions from article pages
-    console.log('Fetching full descriptions for articles...');
+    // Fetch full descriptions and additional images from article pages
+    console.log('Fetching full descriptions and images for articles...');
     
     const promises = uniqueItems.slice(0, 5).map(async (item, index) => {
       if (item.article_url) {
         await new Promise(resolve => setTimeout(resolve, index * 1000)); // Delay to avoid rate-limiting
-        const fullDescription = await fetchArticleDescription(item.article_url);
-        item.description = fullDescription.substring(0, 1000);
+        const { description, additional_images } = await fetchArticleDescription(item.article_url);
+        item.description = description.substring(0, 2000);
+        item.additional_images = additional_images;
       }
       return item;
     });
