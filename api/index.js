@@ -40,14 +40,14 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
 
     // Extract base filename from primary image_url for exclusion
     const imageUrlBase = imageUrls.news_detail_image 
-      ? imageUrls.news_detail_image.split('/').pop().split('.')[0].split('_')[0]
+      ? imageUrls.news_detail_image.split('/').pop().split('.')[0].split('-').slice(0, -1).join('-')
       : '';
 
     // Filter images to include only content-related ones, excluding all provided image URLs
     const additionalImages = allImages.filter(src => {
       if (!src) return false;
       const filename = src.split('/').pop();
-      const srcBase = filename.split('.')[0].split('_')[0];
+      const srcBase = filename.split('.')[0].split('-').slice(0, -1).join('-');
       return srcBase !== imageUrlBase && // Exclude images matching primary image base
              !Object.values(imageUrls).includes(src) && // Exclude all provided image URLs
              !src.includes('_200x120') && 
@@ -60,7 +60,7 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
     });
 
     // Handle description
-    if (!description || description.length < 50 || description.includes('අදාල නිවේදනය පහතින් දැක්වේ')) {
+    if (!description || description.length < 50 || description.includes('අදාළ නිවේදනය පහතින් දැක්වේ')) {
       description = paragraphs.length > 0 
         ? paragraphs.join(' ').trim()
         : 'No detailed description available.';
@@ -106,106 +106,42 @@ module.exports = async (req, res) => {
     const $ = cheerio.load(data);
     const newsItems = [];
 
-    // Updated selectors for news items
-    const selectors = [
-      '.news-item', '.article-item', '.post-item', '.news-card', '.article-card',
-      '.story-item', '.content-item', 'article', '.article', '.post', '.story',
-      '.content', 'li[class*="news"]', 'li[class*="article"]', 'li[class*="post"]',
-      'div[class*="news"]', 'div[class*="article"]', 'div[class*="post"]',
-      'div[class*="story"]', 'div[class*="item"]'
-    ];
+    // Check if JSON data is available (e.g., from an API response embedded in the page)
+    const jsonScript = $('script[type="application/json"]').first();
+    let jsonData = [];
+    if (jsonScript.length) {
+      try {
+        const parsedData = JSON.parse(jsonScript.html());
+        if (parsedData.postResponseDto && Array.isArray(parsedData.postResponseDto)) {
+          jsonData = parsedData.postResponseDto;
+        }
+      } catch (e) {
+        console.log('Failed to parse JSON data from script tag:', e.message);
+      }
+    }
 
-    for (const selector of selectors) {
-      $(selector).each((i, element) => {
-        if (newsItems.length >= 20) return false; // Limit to 20 items
+    // If JSON data is available, use it to populate newsItems
+    if (jsonData.length > 0) {
+      for (const item of jsonData.slice(0, 20)) { // Limit to 20 items
+        const topic = item.short_title || item.title?.rendered || '';
+        const articleUrl = item.post_url ? 
+          (item.post_url.startsWith('http') ? item.post_url : `https://sinhala.newsfirst.lk${item.post_url}`) : '';
+        let description = item.excerpt?.rendered
+          ?.replace(/<[^>]+>/g, '') // Strip HTML tags
+          ?.replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
+          ?.replace(/ශ්‍රී ලංකා ප්‍රවූත්ති.*$/, '')
+          ?.replace(/වැඩි විස්තර කියවන්න.*$/, '')
+          ?.replace(/අදාළ නිවේදනය පහතින් දැක්වේ.*$/, '')
+          ?.replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
+          ?.replace(/\s+/g, ' ')
+          ?.trim() || '';
 
-        const $element = $(element);
-        
-        // Extract title/topic
-        const titleSelectors = [
-          'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-          '.title', '.headline', '.news-title', '.article-title', '.story-title',
-          'a[title]', 'a'
-        ];
-        
-        let topic = '';
-        for (const titleSel of titleSelectors) {
-          const titleEl = $element.find(titleSel).first();
-          if (titleEl.length) {
-            topic = titleEl.attr('title') || titleEl.text().trim();
-            if (topic && topic.length > 10) break;
-          }
+        // Clean description
+        if (!description || description.length < 50 || description.includes('අදාළ නිවේදනය පහතින් දැක්වේ')) {
+          description = 'No detailed description available.';
         }
 
-        // Extract article URL
-        let articleUrl = '';
-        const articleLink = $element.find('a[href]').first();
-        if (articleLink.length) {
-          const href = articleLink.attr('href');
-          articleUrl = href.startsWith('http') ? href : 
-                      href.startsWith('/') ? `https://sinhala.newsfirst.lk${href}` :
-                      `https://sinhala.newsfirst.lk/${href}`;
-        }
-
-        // Extract description from main page
-        let description = '';
-        const descSelectors = [
-          'p', '.summary', '.excerpt', '.description', '.content', '.text', '.lead',
-          '.news-summary', '.article-summary', '.story-summary', '.story-content',
-          '.article-content', '.news-content', '.post-content'
-        ];
-        
-        for (const descSel of descSelectors) {
-          const descEl = $element.find(descSel)
-            .not('h1, h2, h3, h4, h5, h6, a.read-more, button, .button, [class*="more"], [class*="advert"]')
-            .first();
-          if (descEl.length) {
-            const text = descEl.text().trim();
-            if (text && text.length > 20 && text !== topic && 
-                !text.includes('COLOMBO (News1st)') && 
-                !text.includes('ශ්‍රී ලංකා ප්‍රවූත්ති') && 
-                !text.includes('වැඩි විස්තර කියවන්න')) {
-              description = text;
-              break;
-            }
-          }
-        }
-
-        // Fallback: Extract text after title
-        if (!description) {
-          const allText = $element.text().trim();
-          const parts = allText.split(topic);
-          if (parts.length > 1) {
-            let afterTitle = parts[1].trim();
-            if (afterTitle && afterTitle.length > 20) {
-              afterTitle = afterTitle
-                .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
-                .replace(/ශ්‍රී ලංකා ප්‍රවූත්ති.*$/, '')
-                .replace(/වැඩි විස්තර කියවන්න.*$/, '')
-                .replace(/අදාල නිවේදනය පහතින් දැක්වේ.*$/, '')
-                .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '');
-              if (afterTitle.length > 20) {
-                description = afterTitle;
-              }
-            }
-          }
-        }
-
-        // Clean up description
-        if (description) {
-          description = description
-            .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
-            .replace(/ශ්‍රී ලංකා ප්‍රවූත්ති.*$/, '')
-            .replace(/වැඩි විස්තර කියවන්න.*$/, '')
-            .replace(/අදාල නිවේදනය පහතින් දැක්වේ.*$/, '')
-            .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-        }
-
-        // Extract primary image and variants
-        const img = $element.find('img').first();
-        let imageUrls = {
+        const imageUrls = item.images || {
           news_detail_image: '',
           post_thumb: '',
           mobile_banner: '',
@@ -213,43 +149,168 @@ module.exports = async (req, res) => {
           large_tile_image: ''
         };
 
-        if (img.length) {
-          const baseSrc = img.attr('src') || img.attr('data-src') || img.attr('data-lazy-src') || '';
-          if (baseSrc) {
-            const normalizedSrc = baseSrc.startsWith('http') || baseSrc.startsWith('data:') 
-              ? baseSrc 
-              : baseSrc.startsWith('/') 
-                ? `https://sinhala.newsfirst.lk${baseSrc}`
-                : `https://sinhala.newsfirst.lk/${baseSrc}`;
-            
-            // Derive base filename without suffix
-            const filename = normalizedSrc.split('/').pop().split('.')[0].split('_')[0];
-            const basePath = normalizedSrc.split('/').slice(0, -1).join('/');
-
-            // Assign image URLs based on common thumbnail patterns
-            imageUrls.news_detail_image = normalizedSrc;
-            imageUrls.post_thumb = `${basePath}/${filename}_200x120.jpg`;
-            imageUrls.mobile_banner = `${basePath}/${filename}_550x300.jpg`;
-            imageUrls.mini_tile_image = `${basePath}/${filename}_650x250.jpg`;
-            imageUrls.large_tile_image = `${basePath}/${filename}_850x460.jpg`;
-          }
-        }
-
-        // Add item if title is valid
         if (topic && topic.length > 5) {
           newsItems.push({
             topic: topic.substring(0, 200),
-            description: description || 'No description available',
-            ...imageUrls, // Spread image URLs directly into the item
+            description,
+            news_detail_image: imageUrls.news_detail_image || '',
+            post_thumb: imageUrls.post_thumb || '',
+            mobile_banner: imageUrls.mobile_banner || '',
+            mini_tile_image: imageUrls.mini_tile_image || '',
+            large_tile_image: imageUrls.large_tile_image || '',
             article_url: articleUrl || '',
             additional_images: ['No additional images']
           });
         }
-      });
+      }
+    }
 
-      if (newsItems.length > 0) {
-        console.log(`Found ${newsItems.length} items using selector: ${selector}`);
-        break;
+    // Fallback to HTML scraping if JSON data is insufficient
+    if (newsItems.length === 0) {
+      const selectors = [
+        '.news-item', '.article-item', '.post-item', '.news-card', '.article-card',
+        '.story-item', '.content-item', 'article', '.article', '.post', '.story',
+        '.content', 'li[class*="news"]', 'li[class*="article"]', 'li[class*="post"]',
+        'div[class*="news"]', 'div[class*="article"]', 'div[class*="post"]',
+        'div[class*="story"]', 'div[class*="item"]'
+      ];
+
+      for (const selector of selectors) {
+        $(selector).each((i, element) => {
+          if (newsItems.length >= 20) return false; // Limit to 20 items
+
+          const $element = $(element);
+          
+          // Extract title/topic
+          const titleSelectors = [
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+            '.title', '.headline', '.news-title', '.article-title', '.story-title',
+            'a[title]', 'a'
+          ];
+          
+          let topic = '';
+          for (const titleSel of titleSelectors) {
+            const titleEl = $element.find(titleSel).first();
+            if (titleEl.length) {
+              topic = titleEl.attr('title') || titleEl.text().trim();
+              if (topic && topic.length > 10) break;
+            }
+          }
+
+          // Extract article URL
+          let articleUrl = '';
+          const articleLink = $element.find('a[href]').first();
+          if (articleLink.length) {
+            const href = articleLink.attr('href');
+            articleUrl = href.startsWith('http') ? href : 
+                        href.startsWith('/') ? `https://sinhala.newsfirst.lk${href}` :
+                        `https://sinhala.newsfirst.lk/${href}`;
+          }
+
+          // Extract description from main page
+          let description = '';
+          const descSelectors = [
+            'p', '.summary', '.excerpt', '.description', '.content', '.text', '.lead',
+            '.news-summary', '.article-summary', '.story-summary', '.story-content',
+            '.article-content', '.news-content', '.post-content'
+          ];
+          
+          for (const descSel of descSelectors) {
+            const descEl = $element.find(descSel)
+              .not('h1, h2, h3, h4, h5, h6, a.read-more, button, .button, [class*="more"], [class*="advert"]')
+              .first();
+            if (descEl.length) {
+              const text = descEl.text().trim();
+              if (text && text.length > 20 && text !== topic && 
+                  !text.includes('COLOMBO (News1st)') && 
+                  !text.includes('ශ්‍රී ලංකා ප්‍රවූත්ති') && 
+                  !text.includes('වැඩි විස්තර කියවන්න')) {
+                description = text;
+                break;
+              }
+            }
+          }
+
+          // Fallback: Extract text after title
+          if (!description) {
+            const allText = $element.text().trim();
+            const parts = allText.split(topic);
+            if (parts.length > 1) {
+              let afterTitle = parts[1].trim();
+              if (afterTitle && afterTitle.length > 20) {
+                afterTitle = afterTitle
+                  .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
+                  .replace(/ශ්‍රී ලංකා ප්‍රවූත්ති.*$/, '')
+                  .replace(/වැඩි විස්තර කියවන්න.*$/, '')
+                  .replace(/අදාළ නිවේදනය පහතින් දැක්වේ.*$/, '')
+                  .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '');
+                if (afterTitle.length > 20) {
+                  description = afterTitle;
+                }
+              }
+            }
+          }
+
+          // Clean description
+          if (description) {
+            description = description
+              .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
+              .replace(/ශ්‍රී ලංකා ප්‍රවූත්ති.*$/, '')
+              .replace(/වැඩි විස්තර කියවන්න.*$/, '')
+              .replace(/අදාළ නිවේදනය පහතින් දැක්වේ.*$/, '')
+              .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
+              .replace(/\s+/g, ' ')
+              .trim();
+          }
+
+          // Extract primary image and variants
+          const img = $element.find('img').first();
+          let imageUrls = {
+            news_detail_image: '',
+            post_thumb: '',
+            mobile_banner: '',
+            mini_tile_image: '',
+            large_tile_image: ''
+          };
+
+          if (img.length) {
+            const baseSrc = img.attr('src') || img.attr('data-src') || img.attr('data-lazy-src') || '';
+            if (baseSrc) {
+              const normalizedSrc = baseSrc.startsWith('http') || baseSrc.startsWith('data:') 
+                ? baseSrc 
+                : baseSrc.startsWith('/') 
+                  ? `https://sinhala.newsfirst.lk${baseSrc}`
+                  : `https://sinhala.newsfirst.lk/${baseSrc}`;
+              
+              // Derive base filename without suffix
+              const filename = normalizedSrc.split('/').pop().split('.')[0].split('-').slice(0, -1).join('-');
+              const basePath = normalizedSrc.split('/').slice(0, -1).join('/');
+
+              // Assign image URLs based on common thumbnail patterns
+              imageUrls.news_detail_image = normalizedSrc;
+              imageUrls.post_thumb = `${basePath}/${filename}_200x120.jpg`;
+              imageUrls.mobile_banner = `${basePath}/${filename}_550x300.jpg`;
+              imageUrls.mini_tile_image = `${basePath}/${filename}_650x250.jpg`;
+              imageUrls.large_tile_image = `${basePath}/${filename}_850x460.jpg`;
+            }
+          }
+
+          // Add item if title is valid
+          if (topic && topic.length > 5) {
+            newsItems.push({
+              topic: topic.substring(0, 200),
+              description: description || 'No description available',
+              ...imageUrls,
+              article_url: articleUrl || '',
+              additional_images: ['No additional images']
+            });
+          }
+        });
+
+        if (newsItems.length > 0) {
+          console.log(`Found ${newsItems.length} items using selector: ${selector}`);
+          break;
+        }
       }
     }
 
@@ -276,7 +337,7 @@ module.exports = async (req, res) => {
               .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
               .replace(/ශ්‍රී ලංකා ප්‍රවූත්ති.*$/, '')
               .replace(/වැඩි විස්තර කියවන්න.*$/, '')
-              .replace(/අදාල නිවේදනය පහතින් දැක්වේ.*$/, '')
+              .replace(/අදාළ නිවේදනය පහතින් දැක්වේ.*$/, '')
               .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
               .replace(/\s+/g, ' ')
               .trim();
@@ -300,7 +361,7 @@ module.exports = async (req, res) => {
                   ? `https://sinhala.newsfirst.lk${baseSrc}`
                   : `https://sinhala.newsfirst.lk/${baseSrc}`;
               
-              const filename = normalizedSrc.split('/').pop().split('.')[0].split('_')[0];
+              const filename = normalizedSrc.split('/').pop().split('.')[0].split('-').slice(0, -1).join('-');
               const basePath = normalizedSrc.split('/').slice(0, -1).join('/');
 
               imageUrls.news_detail_image = normalizedSrc;
