@@ -20,7 +20,7 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
       .filter(text => text && 
         text.length > 10 && 
         !text.includes('COLOMBO (News1st)') && 
-        !text.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති') && 
+        !text.includes('ශ්‍රී ලංකා ප්‍රවූත්ති') && 
         !text.includes('වැඩි විස්තර කියවන්න') && 
         !text.match(/^\d{1,2}-\d{1,2}-\d{4}/));
     
@@ -41,7 +41,7 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
     // Log all images for debugging
     console.log(`All images with src for ${articleUrl}:`, allImages);
     
-    // Extract base filename from news_detail_image for exclusion
+    // Extract base filename from primary image_url for exclusion
     const imageUrlBase = imageUrls.news_detail_image 
       ? imageUrls.news_detail_image.split('/').pop().split('.')[0].split('_')[0]
       : '';
@@ -219,23 +219,20 @@ module.exports = async (req, res) => {
         };
 
         if (img.length) {
-          let baseSrc = img.attr('src') || img.attr('data-src') || img.attr('data-lazy-src') || '';
+          const baseSrc = img.attr('src') || img.attr('data-src') || img.attr('data-lazy-src') || '';
           if (baseSrc) {
-            // Normalize the source URL
             const normalizedSrc = baseSrc.startsWith('http') || baseSrc.startsWith('data:') 
               ? baseSrc 
               : baseSrc.startsWith('/') 
                 ? `https://sinhala.newsfirst.lk${baseSrc}`
                 : `https://sinhala.newsfirst.lk/${baseSrc}`;
             
-            // Extract base filename (remove thumbnail suffix if present)
-            let filename = normalizedSrc.split('/').pop().split('.')[0];
-            const suffixRegex = /(_\d+x\d+\b)/;
-            filename = filename.replace(suffixRegex, ''); // Remove _200x120, _550x300, etc.
+            // Derive base filename without suffix
+            const filename = normalizedSrc.split('/').pop().split('.')[0].split('_')[0];
             const basePath = normalizedSrc.split('/').slice(0, -1).join('/');
 
-            // Assign image URLs
-            imageUrls.news_detail_image = `${basePath}/${filename}.jpg`;
+            // Assign image URLs based on common thumbnail patterns
+            imageUrls.news_detail_image = normalizedSrc;
             imageUrls.post_thumb = `${basePath}/${filename}_200x120.jpg`;
             imageUrls.mobile_banner = `${basePath}/${filename}_550x300.jpg`;
             imageUrls.mini_tile_image = `${basePath}/${filename}_650x250.jpg`;
@@ -292,7 +289,7 @@ module.exports = async (req, res) => {
           
           const img = $parent.find('img').first();
           let imageUrls = {
-            news_detail_image: '',
+           ニュース_detail_image: '',
             post_thumb: '',
             mobile_banner: '',
             mini_tile_image: '',
@@ -300,7 +297,7 @@ module.exports = async (req, res) => {
           };
 
           if (img.length) {
-            let baseSrc = img.attr('src') || img.attr('data-src') || '';
+            const baseSrc = img.attr('src') || img.attr('data-src') || '';
             if (baseSrc) {
               const normalizedSrc = baseSrc.startsWith('http') 
                 ? baseSrc 
@@ -308,12 +305,10 @@ module.exports = async (req, res) => {
                   ? `https://sinhala.newsfirst.lk${baseSrc}`
                   : `https://sinhala.newsfirst.lk/${baseSrc}`;
               
-              let filename = normalizedSrc.split('/').pop().split('.')[0];
-              const suffixRegex = /(_\d+x\d+\b)/;
-              filename = filename.replace(suffixRegex, '');
+              const filename = normalizedSrc.split('/').pop().split('.')[0].split('_')[0];
               const basePath = normalizedSrc.split('/').slice(0, -1).join('/');
 
-              imageUrls.news_detail_image = `${basePath}/${filename}.jpg`;
+              imageUrls.news_detail_image = normalizedSrc;
               imageUrls.post_thumb = `${basePath}/${filename}_200x120.jpg`;
               imageUrls.mobile_banner = `${basePath}/${filename}_550x300.jpg`;
               imageUrls.mini_tile_image = `${basePath}/${filename}_650x250.jpg`;
