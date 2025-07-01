@@ -1,64 +1,87 @@
-import requests
-from bs4 import BeautifulSoup
-import time
-import json
-from datetime import datetime
-import random
+import axios from "axios";
+import * as cheerio from "cheerio";
+import fs from "fs/promises";
+import { join } from "path";
 
-# Configuration
-base_url = "https://sinhala.newsfirst.lk/news"
-headers = {
-    "User-Agent": f"NewsScraper/1.0 (contact: your-email@example.com)",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache"
+// Configuration
+const baseUrl = "https://sinhala.newsfirst.lk/news";
+const headers = {
+  "User-Agent": "NewsScraper/1.0 (contact: your-email@example.com)",
+  "Cache-Control": "no-cache",
+  "Pragma": "no-cache",
+};
+const seenUrls = new Set(); // Track processed articles
+const data = { articles: [] };
+
+// Function to delay execution
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Scrape function
+async function scrapeNews(page = 1) {
+  const url = `${baseUrl}?page=${page}&nocache=${Math.floor(Math.random() * 10000)}`;
+  try {
+    const response = await axios.get(url, { headers, timeout: 10000 });
+    const $ = cheerio.load(response.data);
+
+    // Find articles (adjust selectors based on site’s HTML)
+    const articles = $("article"); // Inspect HTML for correct tag/class
+    for (const article of articles) {
+      try {
+        const title = $(article).find("h2").text().trim(); // Adjust selector
+        const description = $(article).find("div.article-body").text().trim(); // Adjust for full text
+        let link = $(article).find("a").attr("href");
+        if (!link.startsWith("http")) {
+          link = `https://sinhala.newsfirst.lk${link}`;
+        }
+        const date = $(article).find("time").text().trim() || "N/A";
+        const category = $(article).find("span.category").text().trim() || "N/A";
+        const image = $(article).find("img").attr("src") || "N/A";
+        const additionalImages = $(article)
+          .find("img.additional-image")
+          .map((i, img) => $(img).attr("src"))
+          .get();
+
+        // Only add new articles
+        if (!seenUrls.has(link)) {
+          seenUrls.add(link);
+          data.articles.push({
+            topic: title,
+            description,
+            image_url: image,
+            article_url: link,
+            date,
+            category,
+            additional_images: additionalImages,
+          });
+        }
+      } catch (error) {
+        console.error(`Error processing article: ${error.message}`);
+      }
+      await delay(1000); // 1-second delay between articles
+    }
+    console.log(`Scraped page ${page}`);
+  } catch (error) {
+    console.error(`Error fetching page ${page}: ${error.message}`);
+  }
 }
-seen_urls = set()  # Track processed articles (load from file/database if needed)
-data = {"articles": []}
 
-# Scrape multiple pages
-for page in range(1, 3):  # Adjust page range as needed
-    url = f"{base_url}?page={page}&nocache={random.randint(1, 10000)}"
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()  # Raise error for bad responses
-        soup = BeautifulSoup(response.text, "html.parser")
+// Main function to scrape multiple pages
+async function main() {
+  // Scrape first 2 pages (adjust as needed)
+  for (let page = 1; page <= 2; page++) {
+    await scrapeNews(page);
+    await delay(2000); // 2-second delay between pages
+  }
 
-        # Find articles (adjust selectors based on site’s HTML)
-        articles = soup.find_all("article")  # Inspect HTML for correct tag/class
-        for article in articles:
-            try:
-                title = article.find("h2").text.strip()  # Adjust tag/class
-                description = article.find("div", class_="article-body").text.strip()  # Adjust for full text
-                link = article.find("a")["href"]
-                if not link.startswith("http"):
-                    link = f"https://sinhala.newsfirst.lk{link}"
-                date = article.find("time").text.strip() if article.find("time") else "N/A"
-                category = article.find("span", class_="category").text.strip() if article.find("span", class_="category") else "N/A"
-                image = article.find("img")["src"] if article.find("img") else "N/A"
-                additional_images = [img["src"] for img in article.find_all("img", class_="additional-image")] if article.find_all("img", class_="additional-image") else []
+  // Save output with timestamp
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filePath = join(process.cwd(), `newsfirst_articles_${timestamp}.json`);
+  await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
+  console.log(`Scraping complete. Saved to ${filePath}`);
+}
 
-                # Only add new articles
-                if link not in seen_urls:
-                    seen_urls.add(link)
-                    data["articles"].append({
-                        "topic": title,
-                        "description": description,
-                        "image_url": image,
-                        "article_url": link,
-                        "date": date,
-                        "category": category,
-                        "additional_images": additional_images
-                    })
-            except (AttributeError, KeyError):
-                continue  # Skip malformed articles
-        time.sleep(1)  # Respect rate limits
-    except requests.RequestException as e:
-        print(f"Error fetching page {page}: {e}")
-        continue
-
-# Save output with timestamp
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-with open(f"newsfirst_articles_{timestamp}.json", "w", encoding="utf-8") as f:
-    json.dump(data, f, indent=2, ensure_ascii=False)
-
-print(f"Scraping complete. Saved to newsfirst_articles_{timestamp}.json")
+// Run scraper
+main().catch((error) => {
+  console.error(`Main error: ${error.message}`);
+  process.exit(1);
+});
