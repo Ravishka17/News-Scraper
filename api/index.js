@@ -140,7 +140,9 @@ module.exports = async (req, res) => {
         ];
         
         for (const descSel of descSelectors) {
-          const descEl = $element.find(descSel).not(':has(h1, h2, h3, h4, h5, h6, a.read-more, button, .button, [class*="more"], [class*="advert"]').first();
+          const descEl = $element.find(descSel)
+            .not('h1, h2, h3, h4, h5, h6, a.read-more, button, .button, [class*="more"], [class*="advert"]')
+            .first();
           if (descEl.length) {
             const text = descEl.text().trim();
             if (text && text.length > 20 && text !== topic && 
@@ -226,7 +228,11 @@ module.exports = async (req, res) => {
         
         if (text.length > 15 && text.length < 200) {
           const $parent = $element.closest('div, article, li, section');
-          let description = $parent.find('p').not('.read-more, a, button, .button, [class*="more"], [class*="advert"]').first().text().trim();
+          let description = $parent.find('p')
+            .not('h1, h2, h3, h4, h5, h6, a.read-more, button, .button, [class*="more"], [class*="advert"]')
+            .first()
+            .text()
+            .trim();
           
           if (description) {
             description = description
