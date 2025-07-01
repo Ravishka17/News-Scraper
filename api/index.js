@@ -283,7 +283,7 @@ module.exports = async (req, res) => {
           }
           
           const articleLink = $element.is('a') ? $element : $parent.find('a[href]').first();
-          const articleUrl = article³
+          const articleUrl = articleLink.length ? (articleLink.attr('href').startsWith('http') ? 
             articleLink.attr('href') : `https://sinhala.newsfirst.lk${articleLink.attr('href')}`) : '';
           
           newsItems.push({
