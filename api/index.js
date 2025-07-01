@@ -44,8 +44,11 @@ const fetchArticleDescription = async (articleUrl, imageUrl) => {
     // Extract base filename from imageUrl for exclusion
     let imageUrlBase = '';
     if (imageUrl) {
-      const imageUrlParts = imageUrl.split('/').pop().split('_')[0]; // e.g., "New Project (21)-594529" from "New Project (21)-594529_550x300.jpg"
-      imageUrlBase = imageUrlParts.split('.')[0]; // Remove extension
+      const filename = imageUrl.split('/').pop(); // e.g., "88b47a9f-shooting[1]-494730-495861-594566_850x460.jpg"
+      const baseParts = filename.split('_')[0].split('-');
+      // Take the last part as the unique identifier if it contains multiple hyphens
+      imageUrlBase = baseParts.length > 1 ? baseParts.slice(0, -1).join('-') : filename.split('.')[0]; // e.g., "88b47a9f-shooting[1]-494730-495861"
+      console.log(`imageUrlBase: ${imageUrlBase}`);
     }
     
     // Filter images to include only content-related ones, excluding image_url
@@ -54,8 +57,11 @@ const fetchArticleDescription = async (articleUrl, imageUrl) => {
       .filter(src => {
         if (!src || src === '' || !src.includes('sinhala-uploads/')) return false;
         // Extract base filename from src
-        const srcBase = src.split('/').pop().split('.')[0].split('_')[0]; // e.g., "New Project (21)-594529" or "tajjjjjjjjjjjjjj"
+        const filename = src.split('/').pop(); // e.g., "88b47a9f-shooting[1]-494730-495861.jpg"
+        const srcBase = filename.split('.')[0].split('_')[0]; // Remove extension and thumbnail suffix
+        console.log(`Comparing srcBase: ${srcBase} with imageUrlBase: ${imageUrlBase}`);
         return srcBase !== imageUrlBase && // Exclude images matching image_url's base filename
+               src !== imageUrl && // Explicitly exclude the full image_url
                !src.includes('_200x120') && 
                !src.includes('_550x300') && 
                !src.includes('_650x250') && 
