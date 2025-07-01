@@ -12,6 +12,7 @@ const fetchArticleDescription = async (articleUrl) => {
     });
     
     const $ = cheerio.load(data);
+    
     // Extract description from article body paragraphs
     const paragraphs = $('div[class*="content"], div[class*="article"], div[class*="post"], div[class*="story"], article, section, p')
       .not('.read-more, a, button, .button, [class*="more"], [class*="button"], [class*="advert"], [class*="footer"], [class*="meta"]')
@@ -26,62 +27,104 @@ const fetchArticleDescription = async (articleUrl) => {
     
     let description = paragraphs.join(' ').trim();
     
-    // Extract additional images from article-specific containers
-    const additionalImages = $('article, section, div[class*="content"], div[class*="article"], div[class*="post"], div[class*="story"], .entry-content, .post-content, .article-body')
+    // Extract additional images from the content
+    const additionalImages = [];
+    
+    // First, try to extract from the content field in the JSON data
+    const contentMatch = data.match(/"content":\s*\{"rendered":"([^"]+)"/);
+    if (contentMatch) {
+      const contentHtml = contentMatch[1]
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, '\n')
+        .replace(/&l;/g, '<')
+        .replace(/&g;/g, '>')
+        .replace(/&q;/g, '"')
+        .replace(/&a;/g, '&');
+      
+      const $content = cheerio.load(contentHtml);
+      $content('img').each((i, el) => {
+        let src = $(el).attr('src');
+        if (src && src.startsWith('http') && !src.includes('_200x120') && !src.includes('_550x300')) {
+          additionalImages.push(src);
+        }
+      });
+    }
+    
+    // Also try to extract from the HTML structure
+    $('article, section, div[class*="content"], div[class*="article"], div[class*="post"], div[class*="story"], .entry-content, .post-content, .article-body')
       .find('img')
-      .map((i, el) => {
+      .each((i, el) => {
         let src = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src') || $(el).attr('data-original') || '';
         if (src && !src.startsWith('http') && !src.startsWith('data:')) {
           src = src.startsWith('/') ? `https://sinhala.newsfirst.lk${src}` : `https://sinhala.newsfirst.lk/${src}`;
         }
-        // Log parent element for debugging
-        console.log(`Image: ${src}, Parent: ${$(el).parent().prop('tagName')}.${$(el).parent().attr('class') || ''}`);
-        return src;
-      })
-      .get()
-      .filter(src => src && 
-        src !== '' && 
-        !src.includes('_200x120') && 
-        !src.includes('_550x300') && 
-        !src.includes('_650x250') && 
-        !src.includes('_850x460') && // Exclude thumbnails
-        !src.includes('assets/') && // Exclude assets folder (logos, icons)
-        !src.includes('advertisements/') && // Exclude ads
-        !src.includes('statics/') && // Exclude static images
-        !src.match(/icons8.*\.(png|jpg|jpeg)/) && // Exclude social media icons
-        !src.includes('logo') && // Exclude logos
-        !src.includes('facebook') && 
-        !src.includes('twitter') && 
-        !src.includes('instagram') && 
-        !src.includes('youtube') && 
-        !src.includes('viber') && 
-        !src.includes('whatsapp') && 
-        !src.includes('sirasa') && 
-        !src.includes('shakthi') && 
-        !src.includes('yes_fm') && 
-        !src.includes('legends') && 
-        !src.includes('CMG') && 
-        !src.includes('TV1'));
+        
+        // More lenient filtering - only exclude obvious thumbnails and UI elements
+        if (src && 
+            src !== '' && 
+            src.startsWith('http') &&
+            !src.includes('_200x120') && 
+            !src.includes('_550x300') && 
+            !src.includes('_650x250') && 
+            !src.includes('_850x460') && 
+            !src.includes('logo') &&
+            !src.includes('facebook') && 
+            !src.includes('twitter') && 
+            !src.includes('instagram') && 
+            !src.includes('youtube') && 
+            !src.includes('viber') && 
+            !src.includes('whatsapp') &&
+            !additionalImages.includes(src)) {
+          additionalImages.push(src);
+        }
+      });
+    
+    // Remove duplicates and filter out empty strings
+    const uniqueImages = [...new Set(additionalImages)].filter(img => img && img.trim() !== '');
     
     // Log for debugging
     console.log(`Article URL: ${articleUrl}`);
     console.log(`Found paragraphs: ${paragraphs.length}`);
-    console.log(`Found images: ${additionalImages.length}`, additionalImages);
+    console.log(`Found images: ${uniqueImages.length}`, uniqueImages);
     
-    // If description is short or contains placeholder text, use a cleaner fallback
+    // If description is short or contains placeholder text, try to extract from content
     if (!description || description.length < 50 || description.includes('අදාල නිවේදනය පහතින් දැක්වේ')) {
-      description = paragraphs.length > 0 
-        ? paragraphs.join(' ').trim()
-        : 'No detailed description available.';
-      // Only append image reference if images exist
-      if (additionalImages.length > 0) {
-        description += ' See additional images for more details.';
+      // Try to extract from the JSON content field
+      if (contentMatch) {
+        const contentHtml = contentMatch[1]
+          .replace(/\\"/g, '"')
+          .replace(/\\n/g, '\n')
+          .replace(/&l;/g, '<')
+          .replace(/&g;/g, '>')
+          .replace(/&q;/g, '"')
+          .replace(/&a;/g, '&');
+        
+        const $content = cheerio.load(contentHtml);
+        const contentText = $content.text()
+          .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
+          .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
+          .replace(/වැඩි විස්තර කියවන්න.*$/, '')
+          .replace(/අදාල නිවේදනය පහතින් දැක්වේ.*$/, '')
+          .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        
+        if (contentText && contentText.length > 50) {
+          description = contentText;
+        }
+      }
+      
+      // Fallback to paragraphs if still no good description
+      if (!description || description.length < 50) {
+        description = paragraphs.length > 0 
+          ? paragraphs.join(' ').trim()
+          : 'No detailed description available.';
       }
     }
     
     return {
       description: description,
-      additional_images: additionalImages
+      additional_images: uniqueImages
     };
   } catch (error) {
     console.log(`Failed to fetch description from ${articleUrl}: ${error.message}`);
@@ -170,7 +213,7 @@ module.exports = async (req, res) => {
             const text = descEl.text().trim();
             if (text && text.length > 20 && text !== topic && 
                 !text.includes('COLOMBO (News1st)') && 
-                !text.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති') && 
+                !text.includes('ශ්‍රී ලංකා ප්‍රවৃත්ති') && 
                 !text.includes('වැඩි විස්තර කියවන්න')) {
               description = text;
               break;
@@ -186,7 +229,7 @@ module.exports = async (req, res) => {
             let afterTitle = parts[1].trim();
             if (afterTitle && afterTitle.length > 20) {
               afterTitle = afterTitle.replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
-                                    .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
+                                    .replace(/ශ්‍රී ලංකා ප්‍රවৃত්ති.*$/, '')
                                     .replace(/වැඩි විස්තර කියවන්න.*$/, '')
                                     .replace(/අදාල නිවේදනය පහතින් දැක්වේ.*$/, '')
                                     .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '');
@@ -201,7 +244,7 @@ module.exports = async (req, res) => {
         if (description) {
           description = description
             .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
-            .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
+            .replace(/ශ්‍රී ලංකා ප්‍රවৃත්ති.*$/, '')
             .replace(/වැඩි විස්තර කියවන්න.*$/, '')
             .replace(/අදාල නිවේදනය පහතින් දැක්වේ.*$/, '')
             .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
@@ -260,7 +303,7 @@ module.exports = async (req, res) => {
           if (description) {
             description = description
               .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
-              .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
+              .replace(/ශ්‍රී ලංකා ප්‍රවৃත්ති.*$/, '')
               .replace(/වැඩි විස්තර කියවන්න.*$/, '')
               .replace(/අදාල නිවේදනය පහතින් දැක්වේ.*$/, '')
               .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
@@ -315,6 +358,7 @@ module.exports = async (req, res) => {
     const itemsWithDescriptions = await Promise.all(promises);
     
     console.log(`Fetched descriptions for ${itemsWithDescriptions.filter(item => item.description !== 'No description available').length} articles`);
+    console.log(`Total additional images found: ${itemsWithDescriptions.reduce((sum, item) => sum + item.additional_images.length, 0)}`);
     
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'public, max-age=300');
