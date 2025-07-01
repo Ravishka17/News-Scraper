@@ -1,8 +1,9 @@
 {
-  "name": "newsfirst-scraper",
+  "name": "news-scraper",
   "version": "1.0.0",
+  "type": "module",
   "dependencies": {
     "axios": "^1.7.2",
-    "cheerio": "^1.0.0-rc.12"
+    "cheerio": "^1.0.0"
   }
 }
