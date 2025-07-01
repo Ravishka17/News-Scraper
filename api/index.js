@@ -18,12 +18,12 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
       .map((i, el) => $(el).text().trim())
       .get()
       .filter(text => text && 
-        text.length > 10 && 
+        text.length > 20 && 
         !text.includes('COLOMBO (News1st)') && 
         !text.includes('ශ්‍රී ලංකා ප්‍රවූත්ති') && 
         !text.includes('වැඩි විස්තර කියවන්න') && 
         !text.match(/^\d{1,2}-\d{1,2}-\d{4}/));
-    
+
     let description = paragraphs.join(' ').trim();
     
     // Extract images with src attribute only
@@ -38,9 +38,6 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
       .get()
       .filter(src => src && src.includes('sinhala-uploads/'));
 
-    // Log all images for debugging
-    console.log(`All images with src for ${articleUrl}:`, allImages);
-    
     // Extract base filename from primary image_url for exclusion
     const imageUrlBase = imageUrls.news_detail_image 
       ? imageUrls.news_detail_image.split('/').pop().split('.')[0].split('_')[0]
@@ -62,13 +59,7 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
              !src.includes('statics/'); // Exclude static images
     });
 
-    // Log for debugging
-    console.log(`Article URL: ${articleUrl}`);
-    console.log(`Primary Image URLs:`, imageUrls);
-    console.log(`Found paragraphs: ${paragraphs.length}`);
-    console.log(`Filtered additional images: ${additionalImages.length}`, additionalImages);
-    
-    // If description is short or contains placeholder text, use a cleaner fallback
+    // Handle description
     if (!description || description.length < 50 || description.includes('අදාල නිවේදනය පහතින් දැක්වේ')) {
       description = paragraphs.length > 0 
         ? paragraphs.join(' ').trim()
@@ -77,14 +68,17 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
         description += ' See additional images for more details.';
       }
     }
-    
+
     return {
       description,
-      additional_images: additionalImages
+      additional_images: additionalImages.length > 0 ? additionalImages : ['No additional images']
     };
   } catch (error) {
     console.log(`Failed to fetch description from ${articleUrl}: ${error.message}`);
-    return { description: 'No description available', additional_images: [] };
+    return { 
+      description: 'No detailed description available.', 
+      additional_images: ['No additional images'] 
+    };
   }
 };
 
@@ -169,7 +163,7 @@ module.exports = async (req, res) => {
             const text = descEl.text().trim();
             if (text && text.length > 20 && text !== topic && 
                 !text.includes('COLOMBO (News1st)') && 
-                !text.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති') && 
+                !text.includes('ශ්‍රී ලංකා ප්‍රවූත්ති') && 
                 !text.includes('වැඩි විස්තර කියවන්න')) {
               description = text;
               break;
@@ -184,11 +178,12 @@ module.exports = async (req, res) => {
           if (parts.length > 1) {
             let afterTitle = parts[1].trim();
             if (afterTitle && afterTitle.length > 20) {
-              afterTitle = afterTitle.replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
-                                    .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
-                                    .replace(/වැඩි විස්තර කියවන්න.*$/, '')
-                                    .replace(/අදාල නිවේදනය පහතින් දැක්වේ.*$/, '')
-                                    .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '');
+              afterTitle = afterTitle
+                .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
+                .replace(/ශ්‍රී ලංකා ප්‍රවූත්ති.*$/, '')
+                .replace(/වැඩි විස්තර කියවන්න.*$/, '')
+                .replace(/අදාල නිවේදනය පහතින් දැක්වේ.*$/, '')
+                .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '');
               if (afterTitle.length > 20) {
                 description = afterTitle;
               }
@@ -200,7 +195,7 @@ module.exports = async (req, res) => {
         if (description) {
           description = description
             .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
-            .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
+            .replace(/ශ්‍රී ලංකා ප්‍රවූත්ති.*$/, '')
             .replace(/වැඩි විස්තර කියවන්න.*$/, '')
             .replace(/අදාල නිවේදනය පහතින් දැක්වේ.*$/, '')
             .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
@@ -247,7 +242,7 @@ module.exports = async (req, res) => {
             description: description || 'No description available',
             ...imageUrls, // Spread image URLs directly into the item
             article_url: articleUrl || '',
-            additional_images: []
+            additional_images: ['No additional images']
           });
         }
       });
@@ -279,7 +274,7 @@ module.exports = async (req, res) => {
           if (description) {
             description = description
               .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
-              .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
+              .replace(/ශ්‍රී ලංකා ප්‍රවූත්ති.*$/, '')
               .replace(/වැඩි විස්තර කියවන්න.*$/, '')
               .replace(/අදාල නිවේදනය පහතින් දැක්වේ.*$/, '')
               .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
@@ -289,7 +284,7 @@ module.exports = async (req, res) => {
           
           const img = $parent.find('img').first();
           let imageUrls = {
-           ニュース_detail_image: '',
+            news_detail_image: '',
             post_thumb: '',
             mobile_banner: '',
             mini_tile_image: '',
@@ -325,7 +320,7 @@ module.exports = async (req, res) => {
             description: description || 'No description available',
             ...imageUrls,
             article_url: articleUrl || '',
-            additional_images: []
+            additional_images: ['No additional images']
           });
         }
       });
@@ -357,7 +352,7 @@ module.exports = async (req, res) => {
     
     const itemsWithDescriptions = await Promise.all(promises);
     
-    console.log(`Fetched descriptions for ${itemsWithDescriptions.filter(item => item.description !== 'No description available').length} articles`);
+    console.log(`Fetched descriptions for ${itemsWithDescriptions.filter(item => item.description !== 'No detailed description available.').length} articles`);
     
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'public, max-age=300');
