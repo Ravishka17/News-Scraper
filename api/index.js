@@ -27,13 +27,15 @@ const fetchArticleDescription = async (articleUrl) => {
     let description = paragraphs.join(' ').trim();
     
     // Extract additional images from article-specific containers
-    const additionalImages = $('article, section, div[class*="content"], div[class*="article"], div[class*="post"], div[class*="story"]')
+    const additionalImages = $('article, section, div[class*="content"], div[class*="article"], div[class*="post"], div[class*="story"], .entry-content, .post-content, .article-body')
       .find('img')
       .map((i, el) => {
         let src = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src') || $(el).attr('data-original') || '';
         if (src && !src.startsWith('http') && !src.startsWith('data:')) {
           src = src.startsWith('/') ? `https://sinhala.newsfirst.lk${src}` : `https://sinhala.newsfirst.lk/${src}`;
         }
+        // Log parent element for debugging
+        console.log(`Image: ${src}, Parent: ${$(el).parent().prop('tagName')}.${$(el).parent().attr('class') || ''}`);
         return src;
       })
       .get()
@@ -46,7 +48,7 @@ const fetchArticleDescription = async (articleUrl) => {
         !src.includes('assets/') && // Exclude assets folder (logos, icons)
         !src.includes('advertisements/') && // Exclude ads
         !src.includes('statics/') && // Exclude static images
-        !src.match(/icons8.*\.(png|webp)/) && // Exclude social media icons
+        !src.match(/icons8.*\.(png|jpg|jpeg)/) && // Exclude social media icons
         !src.includes('logo') && // Exclude logos
         !src.includes('facebook') && 
         !src.includes('twitter') && 
@@ -58,20 +60,23 @@ const fetchArticleDescription = async (articleUrl) => {
         !src.includes('shakthi') && 
         !src.includes('yes_fm') && 
         !src.includes('legends') && 
-        !src.includes('CMGwebp') && 
-        !src.includes('TV1') && 
-        !src.includes('.webp')); // Exclude .webp images (often used for icons)
+        !src.includes('CMG') && 
+        !src.includes('TV1'));
     
     // Log for debugging
     console.log(`Article URL: ${articleUrl}`);
     console.log(`Found paragraphs: ${paragraphs.length}`);
     console.log(`Found images: ${additionalImages.length}`, additionalImages);
     
-    // If description is short or contains placeholder text, check for image-based content
+    // If description is short or contains placeholder text, use a cleaner fallback
     if (!description || description.length < 50 || description.includes('අදාල නිවේදනය පහතින් දැක්වේ')) {
       description = paragraphs.length > 0 
-        ? `${paragraphs.join(' ')}. Main content is in the document image. See additional_images for details.`
-        : 'Main content is in the document image. See additional_images for details.';
+        ? paragraphs.join(' ').trim()
+        : 'No detailed description available.';
+      // Only append image reference if images exist
+      if (additionalImages.length > 0) {
+        description += ' See additional images for more details.';
+      }
     }
     
     return {
