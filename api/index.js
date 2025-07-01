@@ -2,7 +2,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 // Helper function to fetch full article description and additional images
-const fetchArticleDescription = async (articleUrl, imageUrls = {}, articleId) => {
+const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
   try {
     const { data } = await axios.get(articleUrl, {
       headers: {
@@ -31,7 +31,7 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}, articleId) =>
       .map((i, el) => {
         let src = $(el).attr('src');
         if (src && !src.startsWith('http') && !src.startsWith('data:')) {
-          src = src.startsWith('/') ? `https://cdn.newsfirst.lk${src}` : `https://cdn.newsfirst.lk/${src}`;
+          src = src.startsWith('/') ? `https://sinhala.newsfirst.lk${src}` : `https://sinhala.newsfirst.lk/${src}`;
         }
         return src;
       })
@@ -41,17 +41,22 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}, articleId) =>
     // Log all images for debugging
     console.log(`All images with src for ${articleUrl}:`, allImages);
     
-    // Extract core identifier from news_detail_image for exclusion
+    // Extract base filename from news_detail_image for exclusion
     const imageUrlBase = imageUrls.news_detail_image 
-      ? imageUrls.news_detail_image.split('/').pop().split('.')[0]
+      ? imageUrls.news_detail_image.split('/').pop().split('.')[0].split('_')[0]
       : '';
 
     // Filter images to include only content-related ones, excluding all provided image URLs
     const additionalImages = allImages.filter(src => {
       if (!src) return false;
-      const filename = src.split('/').pop().split('.')[0];
-      return filename !== imageUrlBase && // Exclude images matching primary image base
+      const filename = src.split('/').pop();
+      const srcBase = filename.split('.')[0].split('_')[0];
+      return srcBase !== imageUrlBase && // Exclude images matching primary image base
              !Object.values(imageUrls).includes(src) && // Exclude all provided image URLs
+             !src.includes('_200x120') && 
+             !src.includes('_550x300') && 
+             !src.includes('_650x250') && 
+             !src.includes('_850x460') && // Exclude thumbnails
              !src.includes('assets/') && // Exclude assets folder (logos, icons)
              !src.includes('advertisements/') && // Exclude ads
              !src.includes('statics/'); // Exclude static images
@@ -60,7 +65,7 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}, articleId) =>
     // Log for debugging
     console.log(`Article URL: ${articleUrl}`);
     console.log(`Primary Image URLs:`, imageUrls);
-    console.log(`Core identifier: ${imageUrlBase}`);
+    console.log(`Found paragraphs: ${paragraphs.length}`);
     console.log(`Filtered additional images: ${additionalImages.length}`, additionalImages);
     
     // If description is short or contains placeholder text, use a cleaner fallback
@@ -140,16 +145,12 @@ module.exports = async (req, res) => {
 
         // Extract article URL
         let articleUrl = '';
-        let articleId = '';
         const articleLink = $element.find('a[href]').first();
         if (articleLink.length) {
           const href = articleLink.attr('href');
           articleUrl = href.startsWith('http') ? href : 
                       href.startsWith('/') ? `https://sinhala.newsfirst.lk${href}` :
                       `https://sinhala.newsfirst.lk/${href}`;
-          // Extract article ID from URL (e.g., last segment before encoded title)
-          const urlParts = articleUrl.split('/');
-          articleId = urlParts[urlParts.length - 2];
         }
 
         // Extract description from main page
@@ -224,36 +225,21 @@ module.exports = async (req, res) => {
             const normalizedSrc = baseSrc.startsWith('http') || baseSrc.startsWith('data:') 
               ? baseSrc 
               : baseSrc.startsWith('/') 
-                ? `https://cdn.newsfirst.lk${baseSrc}`
-                : `https://cdn.newsfirst.lk/${baseSrc}`;
+                ? `https://sinhala.newsfirst.lk${baseSrc}`
+                : `https://sinhala.newsfirst.lk/${baseSrc}`;
             
-            // Fetch article page to find base image
-            const articleResponse = await axios.get(articleUrl, {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-              },
-              timeout: 10000
-            });
-            const article$ = cheerio.load(articleResponse.data);
-            let baseImage = article$.find('img[src*="sinhala-uploads"]').first().attr('src');
-            if (baseImage && !baseImage.startsWith('http')) {
-              baseImage = baseImage.startsWith('/') ? `https://cdn.newsfirst.lk${baseImage}` : `https://cdn.newsfirst.lk/${baseImage}`;
-            }
-            imageUrls.news_detail_image = baseImage || normalizedSrc;
-
-            // Extract core identifier (remove thumbnail suffix)
-            let filename = imageUrls.news_detail_image.split('/').pop().split('.')[0];
+            // Extract base filename (remove thumbnail suffix if present)
+            let filename = normalizedSrc.split('/').pop().split('.')[0];
             const suffixRegex = /(_\d+x\d+\b)/;
-            filename = filename.replace(suffixRegex, '');
+            filename = filename.replace(suffixRegex, ''); // Remove _200x120, _550x300, etc.
+            const basePath = normalizedSrc.split('/').slice(0, -1).join('/');
 
-            const basePath = imageUrls.news_detail_image.split('/').slice(0, -1).join('/');
-            // Append article ID to thumbnail filenames
-            const thumbFilename = articleId ? `${filename}-${articleId}` : filename;
-
-            imageUrls.post_thumb = `${basePath}/${thumbFilename}_200x120.jpg`;
-            imageUrls.mobile_banner = `${basePath}/${thumbFilename}_550x300.jpg`;
-            imageUrls.mini_tile_image = `${basePath}/${thumbFilename}_650x250.jpg`;
-            imageUrls.large_tile_image = `${basePath}/${thumbFilename}_850x460.jpg`;
+            // Assign image URLs
+            imageUrls.news_detail_image = `${basePath}/${filename}.jpg`;
+            imageUrls.post_thumb = `${basePath}/${filename}_200x120.jpg`;
+            imageUrls.mobile_banner = `${basePath}/${filename}_550x300.jpg`;
+            imageUrls.mini_tile_image = `${basePath}/${filename}_650x250.jpg`;
+            imageUrls.large_tile_image = `${basePath}/${filename}_850x460.jpg`;
           }
         }
 
@@ -262,7 +248,7 @@ module.exports = async (req, res) => {
           newsItems.push({
             topic: topic.substring(0, 200),
             description: description || 'No description available',
-            ...imageUrls,
+            ...imageUrls, // Spread image URLs directly into the item
             article_url: articleUrl || '',
             additional_images: []
           });
@@ -312,7 +298,6 @@ module.exports = async (req, res) => {
             mini_tile_image: '',
             large_tile_image: ''
           };
-          let articleId = '';
 
           if (img.length) {
             let baseSrc = img.attr('src') || img.attr('data-src') || '';
@@ -320,41 +305,19 @@ module.exports = async (req, res) => {
               const normalizedSrc = baseSrc.startsWith('http') 
                 ? baseSrc 
                 : baseSrc.startsWith('/') 
-                  ? `https://cdn.newsfirst.lk${baseSrc}`
-                  : `https://cdn.newsfirst.lk/${baseSrc}`;
+                  ? `https://sinhala.newsfirst.lk${baseSrc}`
+                  : `https://sinhala.newsfirst.lk/${baseSrc}`;
               
-              const articleLink = $element.is('a') ? $element : $parent.find('a[href]').first();
-              const articleUrl = articleLink.length ? (articleLink.attr('href').startsWith('http') ? 
-                articleLink.attr('href') : `https://sinhala.newsfirst.lk${articleLink.attr('href')}`) : '';
-              if (articleUrl) {
-                const urlParts = articleUrl.split('/');
-                articleId = urlParts[urlParts.length - 2];
-              }
-
-              // Fetch article page to find base image
-              const articleResponse = await axios.get(articleUrl, {
-                headers: {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                },
-                timeout: 10000
-              });
-              const article$ = cheerio.load(articleResponse.data);
-              let baseImage = article$.find('img[src*="sinhala-uploads"]').first().attr('src');
-              if (baseImage && !baseImage.startsWith('http')) {
-                baseImage = baseImage.startsWith('/') ? `https://cdn.newsfirst.lk${baseImage}` : `https://cdn.newsfirst.lk/${baseImage}`;
-              }
-              imageUrls.news_detail_image = baseImage || normalizedSrc;
-
-              let filename = imageUrls.news_detail_image.split('/').pop().split('.')[0];
+              let filename = normalizedSrc.split('/').pop().split('.')[0];
               const suffixRegex = /(_\d+x\d+\b)/;
               filename = filename.replace(suffixRegex, '');
-              const basePath = imageUrls.news_detail_image.split('/').slice(0, -1).join('/');
-              const thumbFilename = articleId ? `${filename}-${articleId}` : filename;
+              const basePath = normalizedSrc.split('/').slice(0, -1).join('/');
 
-              imageUrls.post_thumb = `${basePath}/${thumbFilename}_200x120.jpg`;
-              imageUrls.mobile_banner = `${basePath}/${thumbFilename}_550x300.jpg`;
-              imageUrls.mini_tile_image = `${basePath}/${thumbFilename}_650x250.jpg`;
-              imageUrls.large_tile_image = `${basePath}/${thumbFilename}_850x460.jpg`;
+              imageUrls.news_detail_image = `${basePath}/${filename}.jpg`;
+              imageUrls.post_thumb = `${basePath}/${filename}_200x120.jpg`;
+              imageUrls.mobile_banner = `${basePath}/${filename}_550x300.jpg`;
+              imageUrls.mini_tile_image = `${basePath}/${filename}_650x250.jpg`;
+              imageUrls.large_tile_image = `${basePath}/${filename}_850x460.jpg`;
             }
           }
           
@@ -384,15 +347,13 @@ module.exports = async (req, res) => {
     const promises = uniqueItems.map(async (item, index) => {
       if (item.article_url) {
         await new Promise(resolve => setTimeout(resolve, index * 1500)); // Delay to avoid rate-limiting
-        const urlParts = item.article_url.split('/');
-        const articleId = urlParts[urlParts.length - 2];
         const { description, additional_images } = await fetchArticleDescription(item.article_url, {
           news_detail_image: item.news_detail_image,
           post_thumb: item.post_thumb,
           mobile_banner: item.mobile_banner,
           mini_tile_image: item.mini_tile_image,
           large_tile_image: item.large_tile_image
-        }, articleId);
+        });
         item.description = description;
         item.additional_images = additional_images;
       }
