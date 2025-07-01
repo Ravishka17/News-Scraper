@@ -2,7 +2,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 // Helper function to fetch full article description and additional images
-const fetchArticleDescription = async (articleUrl) => {
+const fetchArticleDescription = async (articleUrl, imageUrl) => {
   try {
     const { data } = await axios.get(articleUrl, {
       headers: {
@@ -41,22 +41,33 @@ const fetchArticleDescription = async (articleUrl) => {
     // Log all images before filtering
     console.log(`All images with src:`, allImages);
     
-    // Filter images to include only content-related ones
+    // Extract base filename from imageUrl for exclusion
+    let imageUrlBase = '';
+    if (imageUrl) {
+      const imageUrlParts = imageUrl.split('/').pop().split('_')[0]; // e.g., "New Project (21)-594529" from "New Project (21)-594529_550x300.jpg"
+      imageUrlBase = imageUrlParts.split('.')[0]; // Remove extension
+    }
+    
+    // Filter images to include only content-related ones, excluding image_url
     const additionalImages = allImages
       .map(item => item.src)
-      .filter(src => src && 
-        src !== '' && 
-        src.includes('sinhala-uploads/') && // Only include images from sinhala-uploads
-        !src.includes('_200x120') && 
-        !src.includes('_550x300') && 
-        !src.includes('_650x250') && 
-        !src.includes('_850x460') && // Exclude thumbnails
-        !src.includes('assets/') && // Exclude assets folder (logos, icons)
-        !src.includes('advertisements/') && // Exclude ads
-        !src.includes('statics/')); // Exclude static images
+      .filter(src => {
+        if (!src || src === '' || !src.includes('sinhala-uploads/')) return false;
+        // Extract base filename from src
+        const srcBase = src.split('/').pop().split('.')[0].split('_')[0]; // e.g., "New Project (21)-594529" or "tajjjjjjjjjjjjjj"
+        return srcBase !== imageUrlBase && // Exclude images matching image_url's base filename
+               !src.includes('_200x120') && 
+               !src.includes('_550x300') && 
+               !src.includes('_650x250') && 
+               !src.includes('_850x460') && // Exclude thumbnails
+               !src.includes('assets/') && // Exclude assets folder (logos, icons)
+               !src.includes('advertisements/') && // Exclude ads
+               !src.includes('statics/'); // Exclude static images
+      });
     
     // Log for debugging
     console.log(`Article URL: ${articleUrl}`);
+    console.log(`Image URL (for exclusion): ${imageUrl}`);
     console.log(`Found paragraphs: ${paragraphs.length}`);
     console.log(`Filtered images: ${additionalImages.length}`, additionalImages);
     
@@ -162,7 +173,7 @@ module.exports = async (req, res) => {
             const text = descEl.text().trim();
             if (text && text.length > 20 && text !== topic && 
                 !text.includes('COLOMBO (News1st)') && 
-                !text.includes('ශ්‍රී ලංකා ප්‍රවෛီත්ති') && 
+                !text.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති') && 
                 !text.includes('වැඩි විස්තර කියවන්න')) {
               description = text;
               break;
@@ -272,7 +283,7 @@ module.exports = async (req, res) => {
           }
           
           const articleLink = $element.is('a') ? $element : $parent.find('a[href]').first();
-          const articleUrl = articleLink.length ? (articleLink.attr('href').startsWith('http') ? 
+          const articleUrl = article³
             articleLink.attr('href') : `https://sinhala.newsfirst.lk${articleLink.attr('href')}`) : '';
           
           newsItems.push({
@@ -297,7 +308,7 @@ module.exports = async (req, res) => {
     const promises = uniqueItems.map(async (item, index) => {
       if (item.article_url) {
         await new Promise(resolve => setTimeout(resolve, index * 1500)); // Delay to avoid rate-limiting
-        const { description, additional_images } = await fetchArticleDescription(item.article_url);
+        const { description, additional_images } = await fetchArticleDescription(item.article_url, item.image_url);
         item.description = description;
         item.additional_images = additional_images;
       }
