@@ -12,16 +12,23 @@ const fetchArticleDescription = async (articleUrl) => {
     });
     
     const $ = cheerio.load(data);
-    // Try meta description first
-    let description = $('meta[name="description"]').attr('content')?.trim();
+    // Extract from article body paragraphs, excluding bylines
+    const paragraphs = $('.article-body, .content, p')
+      .map((i, el) => $(el).text().trim())
+      .get()
+      .filter(text => text && 
+        text.length > 20 && 
+        !text.includes('COLOMBO (News1st)') && 
+        !text.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති') && // Exclude meta description text
+        !text.match(/^\d{1,2}-\d{1,2}-\d{4}/)); // Exclude timestamps
+    let description = paragraphs.join(' ').substring(0, 400);
     
-    // If meta description is missing or too short, extract from article body
-    if (!description || description.length < 50) {
-      const paragraphs = $('.article-body, .content, p')
-        .map((i, el) => $(el).text().trim())
-        .get()
-        .filter(text => text && text.length > 20 && !text.includes('COLOMBO (News1st)')); // Exclude bylines
-      description = paragraphs.join(' ').substring(0, 400);
+    // Fallback to meta description if no paragraphs found, but clean it
+    if (!description) {
+      description = $('meta[name="description"]').attr('content')?.trim() || '';
+      if (description.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති')) {
+        description = ''; // Discard generic meta description
+      }
     }
     
     return description || 'No description available';
@@ -34,7 +41,7 @@ const fetchArticleDescription = async (articleUrl) => {
 module.exports = async (req, res) => {
   try {
     const type = req.query.type || 'latest';
-    const fetchDescriptions = req.query.descriptions === 'true'; // Add option to fetch full descriptions
+    const fetchDescriptions = req.query.descriptions === 'true'; // Optional flag for full descriptions
     const url = type === 'local' 
       ? 'https://sinhala.newsfirst.lk/local' 
       : 'https://sinhala.newsfirst.lk/latest-news';
@@ -56,7 +63,7 @@ module.exports = async (req, res) => {
     const $ = cheerio.load(data);
     const newsItems = [];
 
-    // Updated selectors based on provided HTML and common patterns
+    // Updated selectors for news items
     const selectors = [
       '.news-item', '.article-item', '.post-item', '.news-card', '.article-card',
       '.story-item', '.content-item', 'article', '.article', '.post', '.story',
@@ -71,7 +78,7 @@ module.exports = async (req, res) => {
 
         const $element = $(element);
         
-        // Try multiple ways to get the title/topic
+        // Extract title/topic
         const titleSelectors = [
           'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
           '.title', '.headline', '.news-title', '.article-title', '.story-title',
@@ -97,7 +104,7 @@ module.exports = async (req, res) => {
                       `https://sinhala.newsfirst.lk/${href}`;
         }
 
-        // Try to find description with improved selectors
+        // Extract description from main page
         let description = '';
         const descSelectors = [
           'p', '.summary', '.excerpt', '.description', '.content', '.text', '.lead',
@@ -109,21 +116,28 @@ module.exports = async (req, res) => {
           const descEl = $element.find(descSel).not(':has(h1, h2, h3, h4, h5, h6)').first();
           if (descEl.length) {
             const text = descEl.text().trim();
-            if (text && text.length > 20 && text !== topic) {
+            if (text && text.length > 20 && text !== topic && 
+                !text.includes('COLOMBO (News1st)') && 
+                !text.includes('ශ්‍රී ලංකා ප්‍රවෘත්ති')) {
               description = text;
               break;
             }
           }
         }
 
-        // If no description, try extracting all text after title
+        // Fallback: Extract text after title, excluding bylines
         if (!description) {
           const allText = $element.text().trim();
           const parts = allText.split(topic);
           if (parts.length > 1) {
-            const afterTitle = parts[1].trim();
-            if (afterTitle.length > 20) {
-              description = afterTitle.substring(0, 300);
+            let afterTitle = parts[1].trim();
+            if (afterTitle && afterTitle.length > 20) {
+              afterTitle = afterTitle.replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
+                                    .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
+                                    .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, ''); // Remove timestamps
+              if (afterTitle.length > 20) {
+                description = afterTitle.substring(0, 300);
+              }
             }
           }
         }
@@ -131,13 +145,14 @@ module.exports = async (req, res) => {
         // Clean up description
         if (description) {
           description = description
-            .replace(/^COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '') // Remove bylines
-            .replace(/^[^\w]*/, '')
+            .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
+            .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
+            .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
             .replace(/\s+/g, ' ')
             .trim();
         }
 
-        // Try to find image
+        // Extract image
         const img = $element.find('img').first();
         let imageUrl = '';
         if (img.length) {
@@ -149,7 +164,7 @@ module.exports = async (req, res) => {
           }
         }
 
-        // Only add if we have a meaningful title
+        // Add item if title is valid
         if (topic && topic.length > 5) {
           newsItems.push({
             topic: topic.substring(0, 200),
@@ -166,7 +181,7 @@ module.exports = async (req, res) => {
       }
     }
 
-    // If still no items, try aggressive approach
+    // Aggressive approach if no items found
     if (newsItems.length === 0) {
       console.log('No items found with standard selectors, trying aggressive approach...');
       
@@ -178,10 +193,19 @@ module.exports = async (req, res) => {
         
         if (text.length > 15 && text.length < 200) {
           const $parent = $element.closest('div, article, li, section');
-          const description = $parent.find('p').first().text().trim();
+          let description = $parent.find('p').first().text().trim();
+          
+          if (description) {
+            description = description
+              .replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
+              .replace(/ශ්‍රී ලංකා ප්‍රවෘත්ති.*$/, '')
+              .replace(/^\d{1,2}-\d{1,2}-\d{4}.*$/, '')
+              .replace(/\s+/g, ' ')
+              .trim();
+          }
+          
           const img = $parent.find('img').first();
           let imageUrl = '';
-          
           if (img.length) {
             imageUrl = img.attr('src') || img.attr('data-src') || '';
             if (imageUrl && !imageUrl.startsWith('http')) {
@@ -210,12 +234,13 @@ module.exports = async (req, res) => {
       index === self.findIndex(i => i.topic === item.topic)
     );
 
-    // Fetch full descriptions from article pages if requested or description is missing/short
+    // Fetch descriptions from article pages if needed
     if (fetchDescriptions || uniqueItems.some(item => !item.description || item.description === 'No description available' || item.description.length < 50)) {
       console.log('Fetching full descriptions for articles...');
       
-      const promises = uniqueItems.slice(0, 5).map(async (item) => {
+      const promises = uniqueItems.slice(0, 5).map(async (item, index) => {
         if (item.article_url && (!item.description || item.description === 'No description available' || item.description.length < 50)) {
+          await new Promise(resolve => setTimeout(resolve, index * 1000)); // Delay to avoid rate-limiting
           const fullDescription = await fetchArticleDescription(item.article_url);
           item.description = fullDescription.substring(0, 400);
         }
@@ -235,7 +260,7 @@ module.exports = async (req, res) => {
 
     console.log(`Final result: ${uniqueItems.length} unique news items`);
 
-    // If still no items, log debugging info
+    // If no items found, return debugging info
     if (uniqueItems.length === 0) {
       console.log('No news items found. Debugging info:');
       console.log('Page title:', $('title').text());
