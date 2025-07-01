@@ -13,7 +13,7 @@ const fetchArticleDescription = async (articleUrl) => {
     
     const $ = cheerio.load(data);
     // Extract description from article body paragraphs
-    const paragraphs = $('div[class*="content"], div[class*="article"], div[class*="post"], div[class*="story"], p')
+    const paragraphs = $('div[class*="content"], div[class*="article"], div[class*="post"], div[class*="story"], article, section, p')
       .not('.read-more, a, button, .button, [class*="more"], [class*="button"], [class*="advert"], [class*="footer"], [class*="meta"]')
       .map((i, el) => $(el).text().trim())
       .get()
@@ -26,8 +26,8 @@ const fetchArticleDescription = async (articleUrl) => {
     
     let description = paragraphs.join(' ').trim();
     
-    // Extract additional images from article body
-    const additionalImages = $('div[class*="content"], div[class*="article"], div[class*="post"], div[class*="story"], article, section')
+    // Extract additional images from the entire article body
+    const additionalImages = $('body, article, section, div[class*="content"], div[class*="article"], div[class*="post"], div[class*="story"]')
       .find('img')
       .map((i, el) => {
         let src = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src') || $(el).attr('data-original') || '';
