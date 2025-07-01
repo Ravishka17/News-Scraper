@@ -26,8 +26,8 @@ const fetchArticleDescription = async (articleUrl) => {
     
     let description = paragraphs.join(' ').trim();
     
-    // Extract additional images from the entire article body
-    const additionalImages = $('body, article, section, div[class*="content"], div[class*="article"], div[class*="post"], div[class*="story"]')
+    // Extract additional images from article-specific containers
+    const additionalImages = $('article, section, div[class*="content"], div[class*="article"], div[class*="post"], div[class*="story"]')
       .find('img')
       .map((i, el) => {
         let src = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src') || $(el).attr('data-original') || '';
@@ -42,7 +42,25 @@ const fetchArticleDescription = async (articleUrl) => {
         !src.includes('_200x120') && 
         !src.includes('_550x300') && 
         !src.includes('_650x250') && 
-        !src.includes('_850x460')); // Exclude thumbnails
+        !src.includes('_850x460') && // Exclude thumbnails
+        !src.includes('assets/') && // Exclude assets folder (logos, icons)
+        !src.includes('advertisements/') && // Exclude ads
+        !src.includes('statics/') && // Exclude static images
+        !src.match(/icons8.*\.(png|webp)/) && // Exclude social media icons
+        !src.includes('logo') && // Exclude logos
+        !src.includes('facebook') && 
+        !src.includes('twitter') && 
+        !src.includes('instagram') && 
+        !src.includes('youtube') && 
+        !src.includes('viber') && 
+        !src.includes('whatsapp') && 
+        !src.includes('sirasa') && 
+        !src.includes('shakthi') && 
+        !src.includes('yes_fm') && 
+        !src.includes('legends') && 
+        !src.includes('CMGwebp') && 
+        !src.includes('TV1') && 
+        !src.includes('.webp')); // Exclude .webp images (often used for icons)
     
     // Log for debugging
     console.log(`Article URL: ${articleUrl}`);
@@ -281,7 +299,7 @@ module.exports = async (req, res) => {
     
     const promises = uniqueItems.map(async (item, index) => {
       if (item.article_url) {
-        await new Promise(resolve => setTimeout(resolve, index * 1500)); // Increased delay to avoid rate-limiting
+        await new Promise(resolve => setTimeout(resolve, index * 1500)); // Delay to avoid rate-limiting
         const { description, additional_images } = await fetchArticleDescription(item.article_url);
         item.description = description;
         item.additional_images = additional_images;
