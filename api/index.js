@@ -26,8 +26,8 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
 
     let description = paragraphs.join(' ').trim();
     
-    // Extract images with src attribute only
-    const allImages = $('body').find('img[src]')
+    // Extract images with src attribute only - FIXED
+    const allImages = $('img[src]')
       .map((i, el) => {
         let src = $(el).attr('src');
         if (src && !src.startsWith('http') && !src.startsWith('data:')) {
@@ -38,18 +38,26 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
       .get()
       .filter(src => src && src.includes('sinhala-uploads/'));
 
-    // Extract base filename from primary image_url for exclusion
-    const imageUrlBase = imageUrls.news_detail_image 
-      ? imageUrls.news_detail_image.split('/').pop().split('.')[0].split('-').slice(0, -1).join('-')
-      : '';
+    // Get all provided image URLs for exclusion
+    const providedImageUrls = Object.values(imageUrls).filter(url => url);
 
     // Filter images to include only content-related ones, excluding all provided image URLs
     const additionalImages = allImages.filter(src => {
       if (!src) return false;
+      
+      // Exclude all provided image URLs
+      if (providedImageUrls.includes(src)) return false;
+      
+      // Extract base filename for comparison
       const filename = src.split('/').pop();
       const srcBase = filename.split('.')[0].split('-').slice(0, -1).join('-');
+      
+      // Extract base from primary image for exclusion
+      const imageUrlBase = imageUrls.news_detail_image 
+        ? imageUrls.news_detail_image.split('/').pop().split('.')[0].split('-').slice(0, -1).join('-')
+        : '';
+      
       return srcBase !== imageUrlBase && // Exclude images matching primary image base
-             !Object.values(imageUrls).includes(src) && // Exclude all provided image URLs
              !src.includes('_200x120') && 
              !src.includes('_550x300') && 
              !src.includes('_650x250') && 
@@ -59,19 +67,22 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
              !src.includes('statics/'); // Exclude static images
     });
 
+    // Remove duplicates
+    const uniqueAdditionalImages = [...new Set(additionalImages)];
+
     // Handle description
     if (!description || description.length < 50 || description.includes('අදාළ නිවේදනය පහතින් දැක්වේ')) {
       description = paragraphs.length > 0 
         ? paragraphs.join(' ').trim()
         : 'No detailed description available.';
-      if (additionalImages.length > 0) {
+      if (uniqueAdditionalImages.length > 0) {
         description += ' See additional images for more details.';
       }
     }
 
     return {
       description,
-      additional_images: additionalImages.length > 0 ? additionalImages : ['No additional images']
+      additional_images: uniqueAdditionalImages.length > 0 ? uniqueAdditionalImages : ['No additional images']
     };
   } catch (error) {
     console.log(`Failed to fetch description from ${articleUrl}: ${error.message}`);
@@ -124,8 +135,11 @@ module.exports = async (req, res) => {
     if (jsonData.length > 0) {
       for (const item of jsonData.slice(0, 20)) { // Limit to 20 items
         const topic = item.short_title || item.title?.rendered || '';
+        
+        // FIXED: Properly construct article URL
         const articleUrl = item.post_url ? 
-          (item.post_url.startsWith('http') ? item.post_url : `https://sinhala.newsfirst.lk${item.post_url}`) : '';
+          (item.post_url.startsWith('http') ? item.post_url : `https://sinhala.newsfirst.lk/${item.post_url}`) : '';
+        
         let description = item.excerpt?.rendered
           ?.replace(/<[^>]+>/g, '') // Strip HTML tags
           ?.replace(/COLOMBO\s*\([^)]+\)\s*[-–]\s*/i, '')
@@ -141,14 +155,9 @@ module.exports = async (req, res) => {
           description = 'No detailed description available.';
         }
 
-        const imageUrls = item.images || {
-          news_detail_image: '',
-          post_thumb: '',
-          mobile_banner: '',
-          mini_tile_image: '',
-          large_tile_image: ''
-        };
-
+        // FIXED: Use correct image URLs from JSON data
+        const imageUrls = item.images || {};
+        
         if (topic && topic.length > 5) {
           newsItems.push({
             topic: topic.substring(0, 200),
