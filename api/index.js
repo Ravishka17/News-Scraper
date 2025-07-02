@@ -26,20 +26,24 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
 
     let description = paragraphs.join(' ').trim();
     
-    // Extract images with src attribute only - FIXED
+    // Extract images with src attribute only
     const allImages = $('img[src]')
       .map((i, el) => {
         let src = $(el).attr('src');
-        if (src && !src.startsWith('http') && !src.startsWith('data:')) {
+        if (!src) return null;
+        // Ensure the URL is absolute
+        if (!src.startsWith('http') && !src.startsWith('data:')) {
           src = src.startsWith('/') ? `https://sinhala.newsfirst.lk${src}` : `https://sinhala.newsfirst.lk/${src}`;
         }
+        // Only include valid image URLs
+        if (!src.match(/\.(jpg|jpeg|png|gif)$/i)) return null;
         return src;
       })
       .get()
       .filter(src => src && src.includes('sinhala-uploads/'));
 
     // Get all provided image URLs for exclusion
-    const providedImageUrls = Object.values(imageUrls).filter(url => url);
+    const providedImageUrls = Object.values(imageUrls).filter(url => url && url.match(/\.(jpg|jpeg|png|gif)$/i));
 
     // Filter images to include only content-related ones, excluding all provided image URLs
     const additionalImages = allImages.filter(src => {
@@ -136,7 +140,7 @@ module.exports = async (req, res) => {
       for (const item of jsonData.slice(0, 20)) { // Limit to 20 items
         const topic = item.short_title || item.title?.rendered || '';
         
-        // FIXED: Properly construct article URL
+        // Properly construct article URL
         const articleUrl = item.post_url ? 
           (item.post_url.startsWith('http') ? item.post_url : `https://sinhala.newsfirst.lk/${item.post_url}`) : '';
         
@@ -155,7 +159,7 @@ module.exports = async (req, res) => {
           description = 'No detailed description available.';
         }
 
-        // FIXED: Use correct image URLs from JSON data
+        // Use correct image URLs from JSON data
         const imageUrls = item.images || {};
         
         if (topic && topic.length > 5) {
