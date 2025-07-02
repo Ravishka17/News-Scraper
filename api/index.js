@@ -1,8 +1,17 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 
+// Helper function to extract image URLs from HTML content (e.g., content.rendered)
+const extractImagesFromContent = (content) => {
+  const $ = cheerio.load(content);
+  return $('img[src]')
+    .map((i, el) => $(el).attr('src'))
+    .get()
+    .filter(src => src && src.match(/\.(jpg|jpeg|png|gif)$/i));
+};
+
 // Helper function to fetch full article description and additional images
-const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
+const fetchArticleDescription = async (articleUrl, imageUrls = {}, jsonContent = {}) => {
   try {
     const { data } = await axios.get(articleUrl, {
       headers: {
@@ -26,7 +35,7 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
 
     let description = paragraphs.join(' ').trim();
     
-    // Extract images with src attribute only
+    // Extract images with src attribute only from the article page
     const allImages = $('img[src]')
       .map((i, el) => {
         let src = $(el).attr('src');
@@ -45,12 +54,21 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
     // Get all provided image URLs for exclusion
     const providedImageUrls = Object.values(imageUrls).filter(url => url && url.match(/\.(jpg|jpeg|png|gif)$/i));
 
-    // Filter images to include only content-related ones, excluding all provided image URLs
+    // Extract images from JSON content.rendered and excerpt.rendered
+    const jsonImages = [
+      ...(jsonContent.content?.rendered ? extractImagesFromContent(jsonContent.content.rendered) : []),
+      ...(jsonContent.excerpt?.rendered ? extractImagesFromContent(jsonContent.excerpt.rendered) : [])
+    ];
+
+    // Combine provided image URLs and JSON images for exclusion
+    const excludeImages = [...new Set([...providedImageUrls, ...jsonImages])];
+
+    // Filter images to include only content-related ones, excluding all provided and JSON image URLs
     const additionalImages = allImages.filter(src => {
       if (!src) return false;
       
-      // Exclude all provided image URLs
-      if (providedImageUrls.includes(src)) return false;
+      // Exclude all provided and JSON image URLs
+      if (excludeImages.includes(src)) return false;
       
       // Extract base filename for comparison
       const filename = src.split('/').pop();
@@ -172,7 +190,8 @@ module.exports = async (req, res) => {
             mini_tile_image: imageUrls.mini_tile_image || '',
             large_tile_image: imageUrls.large_tile_image || '',
             article_url: articleUrl || '',
-            additional_images: ['No additional images']
+            additional_images: ['No additional images'],
+            jsonContent: item // Pass JSON content for image exclusion
           });
         }
       }
@@ -315,7 +334,8 @@ module.exports = async (req, res) => {
               description: description || 'No description available',
               ...imageUrls,
               article_url: articleUrl || '',
-              additional_images: ['No additional images']
+              additional_images: ['No additional images'],
+              jsonContent: {} // Empty JSON content for HTML-scraped items
             });
           }
         });
@@ -394,7 +414,8 @@ module.exports = async (req, res) => {
             description: description || 'No description available',
             ...imageUrls,
             article_url: articleUrl || '',
-            additional_images: ['No additional images']
+            additional_images: ['No additional images'],
+            jsonContent: {} // Empty JSON content for aggressive approach
           });
         }
       });
@@ -411,13 +432,17 @@ module.exports = async (req, res) => {
     const promises = uniqueItems.map(async (item, index) => {
       if (item.article_url) {
         await new Promise(resolve => setTimeout(resolve, index * 1500)); // Delay to avoid rate-limiting
-        const { description, additional_images } = await fetchArticleDescription(item.article_url, {
-          news_detail_image: item.news_detail_image,
-          post_thumb: item.post_thumb,
-          mobile_banner: item.mobile_banner,
-          mini_tile_image: item.mini_tile_image,
-          large_tile_image: item.large_tile_image
-        });
+        const { description, additional_images } = await fetchArticleDescription(
+          item.article_url,
+          {
+            news_detail_image: item.news_detail_image,
+            post_thumb: item.post_thumb,
+            mobile_banner: item.mobile_banner,
+            mini_tile_image: item.mini_tile_image,
+            large_tile_image: item.large_tile_image
+          },
+          item.jsonContent // Pass JSON content for exclusion
+        );
         item.description = description;
         item.additional_images = additional_images;
       }
