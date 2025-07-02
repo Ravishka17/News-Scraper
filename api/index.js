@@ -45,35 +45,30 @@ const fetchArticleDescription = async (articleUrl, imageUrls = {}) => {
     // Get all provided image URLs for exclusion
     const providedImageUrls = Object.values(imageUrls).filter(url => url && url.match(/\.(jpg|jpeg|png|gif)$/i));
 
-    // Extract base filenames for provided images to exclude variants
-    const providedImageBases = providedImageUrls.map(url => {
-      const filename = url.split('/').pop().split('.')[0];
-      // Remove common thumbnail suffixes
-      return filename.replace(/(_\d+x\d+|_acf_cropped|\d+)$/i, '');
-    }).filter(base => base);
-
-    // Filter images to include only content-related ones, excluding all provided image URLs and their variants
+    // Filter images to include only content-related ones, excluding all provided image URLs
     const additionalImages = allImages.filter(src => {
       if (!src) return false;
       
-      // Exclude provided image URLs
+      // Exclude all provided image URLs
       if (providedImageUrls.includes(src)) return false;
       
       // Extract base filename for comparison
-      const filename = src.split('/').pop().split('.')[0];
-      const srcBase = filename.replace(/(_\d+x\d+|_acf_cropped|\d+)$/i, '');
+      const filename = src.split('/').pop();
+      const srcBase = filename.split('.')[0].split('-').slice(0, -1).join('-');
       
-      // Exclude images that match the base filename of any provided image
-      if (providedImageBases.some(base => base && srcBase.includes(base))) return false;
+      // Extract base from primary image for exclusion
+      const imageUrlBase = imageUrls.news_detail_image 
+        ? imageUrls.news_detail_image.split('/').pop().split('.')[0].split('-').slice(0, -1).join('-')
+        : '';
       
-      // Exclude thumbnails, assets, ads, and static images
-      return !src.includes('_200x120') && 
+      return srcBase !== imageUrlBase && // Exclude images matching primary image base
+             !src.includes('_200x120') && 
              !src.includes('_550x300') && 
              !src.includes('_650x250') && 
-             !src.includes('_850x460') && 
-             !src.includes('assets/') && 
-             !src.includes('advertisements/') && 
-             !src.includes('statics/');
+             !src.includes('_850x460') && // Exclude thumbnails
+             !src.includes('assets/') && // Exclude assets folder (logos, icons)
+             !src.includes('advertisements/') && // Exclude ads
+             !src.includes('statics/'); // Exclude static images
     });
 
     // Remove duplicates
@@ -234,7 +229,7 @@ module.exports = async (req, res) => {
           ];
           
           for (const descSel of descSelectors) {
-            const descEl =$.find(descSel)
+            const descEl = $element.find(descSel)
               .not('h1, h2, h3, h4, h5, h6, a.read-more, button, .button, [class*="more"], [class*="advert"]')
               .first();
             if (descEl.length) {
