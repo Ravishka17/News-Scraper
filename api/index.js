@@ -1,7 +1,10 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 
-const API_URL = 'https://apisinhala.newsfirst.lk/post/PostPagination/0/5';
+const API_URLS = {
+  latest: 'https://apisinhala.newsfirst.lk/post/PostPagination/0/5',
+  local: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/81/0/5'
+};
 
 // Helper function to extract description and additional images from content.rendered
 const extractContentData = (contentRendered, imageUrls = {}) => {
@@ -94,8 +97,13 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
 
 module.exports = async (req, res) => {
   try {
+    const type = req.query.type || 'latest';
+    const apiUrl = API_URLS[type] || API_URLS.latest; // Default to latest if type is invalid
+
+    console.log(`Scraping URL: ${apiUrl}`);
+
     // Fetch data from the API
-    const { data } = await axios.get(API_URL, {
+    const { data } = await axios.get(apiUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json',
@@ -161,7 +169,7 @@ module.exports = async (req, res) => {
     res.status(500).json({ 
       error: 'Failed to scrape news', 
       details: error.message,
-      url: API_URL
+      url: API_URLS[req.query.type] || API_URLS.latest
     });
   }
 };
