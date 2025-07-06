@@ -16,18 +16,27 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
     // Log the raw content.rendered for debugging
     console.log('Raw content.rendered:', contentRendered.substring(0, 200)); // Log first 200 chars
     
-    // Extract description from paragraphs
-    const paragraphs = $('p')
-      .map((i, el) => $(el).text().trim())
-      .get()
-      .filter(text => text && 
-        !text.includes('COLOMBO (News1st)') && 
-        !text.includes('ශ්‍රී ලංකා ප්‍රවූත්ති') && 
-        !text.includes('වැඩි විස්තර කියවන්න'));
+    // Extract text from <h3> and <p> tags
+    const elements = $('h3, p').map((i, el) => $(el).text().trim()).get();
+    
+    // Log all extracted elements for debugging
+    console.log('Extracted elements:', elements);
+
+    // Filter and clean paragraphs
+    const paragraphs = elements.filter(text => 
+      text && 
+      text.length > 0 && 
+      !text.includes('වැඩි විස්තර කියවන්න') && // Exclude "Read more details"
+      !text.match(/^\d{1,2}-\d{1,2}-\d{4}/) // Exclude date-like patterns
+    ).map(text => {
+      // Remove "COLOMBO (News 1st)" or "COLOMBO (News1st)" prefix if present
+      return text.replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '').trim();
+    }).filter(text => text.length > 0); // Ensure non-empty after cleaning
 
     // Log filtered paragraphs for debugging
     console.log('Filtered paragraphs:', paragraphs);
 
+    // Join paragraphs to form description
     let description = paragraphs.join(' ').trim();
     
     // Extract images with src attribute only
@@ -79,7 +88,7 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
     const uniqueAdditionalImages = [...new Set(additionalImages)];
 
     // Handle description
-    if (!description || description.length < 10 || description.includes('අදාළ නිවේදනය පහතින් දැක්වේ')) {
+    if (!description || description.length < 10) {
       description = paragraphs.length > 0 
         ? paragraphs.join(' ').trim()
         : 'No detailed description available.';
