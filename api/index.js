@@ -5,7 +5,8 @@ const API_URLS = {
   latest: 'https://apisinhala.newsfirst.lk/post/PostPagination/0/5',
   local: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/81/0/5',
   sports: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/283/0/3',
-  featured: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/36569/0/5'
+  featured: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/36569/0/5',
+  world: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/84/1/5'
 };
 
 // Helper function to decode Unicode escapes
