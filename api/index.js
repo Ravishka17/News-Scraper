@@ -8,40 +8,61 @@ const API_URLS = {
   featured: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/36569/0/5'
 };
 
+// Helper function to decode Unicode escapes
+const decodeUnicode = (str) => {
+  return str.replace(/\\u[\dA-F]{4}/gi, (match) => {
+    return String.fromCharCode(parseInt(match.replace('\\u', ''), 16));
+  });
+};
+
 // Helper function to extract description and additional images from content.rendered
 const extractContentData = (contentRendered, imageUrls = {}) => {
   try {
-    // Normalize content by removing extra newlines and whitespace
-    const normalizedContent = contentRendered.replace(/\r\n/g, '').trim();
+    // Normalize content: decode Unicode escapes and remove extra newlines/whitespace
+    const normalizedContent = decodeUnicode(contentRendered)
+      .replace(/\r\n/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     
-    // Log the raw and normalized content.rendered for debugging
+    // Log raw and normalized content for debugging
     console.log('Raw content.rendered:', contentRendered.substring(0, 200));
     console.log('Normalized content.rendered:', normalizedContent.substring(0, 200));
     
-    const $ = cheerio.load(normalizedContent);
+    const $ = cheerio.load(normalizedContent, { decodeEntities: false });
     
     // Extract text from <h3> and <p> tags
-    const elements = $('h3, p').map((i, el) => $(el).text().trim()).get();
+    const elements = $('h3, p').map((i, el) => {
+      const text = $(el).text().trim();
+      console.log(`Element ${i} (${el.tagName}):`, text); // Log each element
+      return text;
+    }).get();
     
-    // Log all extracted elements for debugging
+    // Log all extracted elements
     console.log('Extracted elements:', elements);
 
     // Filter and clean paragraphs
     const paragraphs = elements
-      .filter(text => 
-        text && // Ensure text is not empty
-        text.length > 0 && // Ensure non-zero length
-        !text.includes('වැඩි විස්තර කියවන්න') && // Exclude "Read more details"
-        !text.match(/^\d{1,2}-\d{1,2}-\d{4}/) && // Exclude date-like patterns
-        !text.match(/^\s*$/) // Exclude empty or whitespace-only strings
-      )
-      .map(text => {
-        // Remove "COLOMBO (News 1st)" or "COLOMBO (News1st)" prefix if present
-        return text.replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '').trim();
+      .filter((text, index) => {
+        const isValid = text && // Ensure text is not empty
+          text.length > 0 && // Ensure non-zero length
+          !text.includes('වැඩි විස්තර කියවන්න') && // Exclude "Read more details"
+          !text.match(/^\d{1,2}-\d{1,2}-\d{4}/); // Exclude date-like patterns
+        console.log(`Element ${index} valid:`, isValid, 'Text:', text); // Log filtering decision
+        return isValid;
       })
-      .filter(text => text.length > 0); // Ensure non-empty after cleaning
+      .map((text, index) => {
+        // Remove "COLOMBO (News 1st)" or "COLOMBO (News1st)" prefix
+        const cleanedText = text.replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '').trim();
+        console.log(`Cleaned element ${index}:`, cleanedText); // Log cleaned text
+        return cleanedText;
+      })
+      .filter((text, index) => {
+        const isNonEmpty = text.length > 0;
+        console.log(`Final element ${index} included:`, isNonEmpty, 'Text:', text); // Log final inclusion
+        return isNonEmpty;
+      });
 
-    // Log filtered paragraphs for debugging
+    // Log filtered paragraphs
     console.log('Filtered paragraphs:', paragraphs);
 
     // Join paragraphs to form description
@@ -69,30 +90,23 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
     // Get all provided image URLs for exclusion
     const providedImageUrls = Object.values(imageUrls).filter(url => url && url.match(/\.(jpg|jpeg|png|gif)$/i));
 
-    // Filter images to include only content-related ones, excluding all provided image URLs
+    // Filter images to include only content-related ones
     const additionalImages = allImages.filter(src => {
       if (!src) return false;
-      
-      // Exclude all provided image URLs
       if (providedImageUrls.includes(src)) return false;
-      
-      // Extract base filename for comparison
       const filename = src.split('/').pop();
       const srcBase = filename.split('.')[0].split('-').slice(0, -1).join('-');
-      
-      // Extract base from primary image for exclusion
       const imageUrlBase = imageUrls.news_detail_image 
         ? imageUrls.news_detail_image.split('/').pop().split('.')[0].split('-').slice(0, -1).join('-')
         : '';
-      
-      return srcBase !== imageUrlBase && // Exclude images matching primary image base
+      return srcBase !== imageUrlBase && 
              !src.includes('_200x120') && 
              !src.includes('_550x300') && 
              !src.includes('_650x250') && 
-             !src.includes('_850x460') && // Exclude thumbnails
-             !src.includes('assets/') && // Exclude assets folder (logos, icons)
-             !src.includes('advertisements/') && // Exclude ads
-             !src.includes('statics/'); // Exclude static images
+             !src.includes('_850x460') && 
+             !src.includes('assets/') && 
+             !src.includes('advertisements/') && 
+             !src.includes('statics/');
     });
 
     // Remove duplicates
@@ -124,11 +138,10 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
 module.exports = async (req, res) => {
   try {
     const type = req.query.type || 'latest';
-    const apiUrl = API_URLS[type] || API_URLS.latest; // Default to latest if type is invalid
+    const apiUrl = API_URLS[type] || API_URLS.latest;
 
     console.log(`Scraping URL: ${apiUrl}`);
 
-    // Fetch data from the API
     const { data } = await axios.get(apiUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -142,19 +155,13 @@ module.exports = async (req, res) => {
 
     const newsItems = [];
 
-    // Process JSON data from API
     if (data.postResponseDto && Array.isArray(data.postResponseDto)) {
-      for (const item of data.postResponseDto.slice(0, 20)) { // Limit to 20 items
+      for (const item of data.postResponseDto.slice(0, 20)) {
         const topic = item.short_title || item.title?.rendered || '';
-        
-        // Properly construct article URL
         const articleUrl = item.post_url ? 
           (item.post_url.startsWith('http') ? item.post_url : `https://sinhala.newsfirst.lk/${item.post_url}`) : '';
-        
-        // Use correct image URLs from JSON data
         const imageUrls = item.images || {};
         
-        // Extract description and additional images from content.rendered
         const { description, additional_images } = extractContentData(item.content?.rendered || '', {
           news_detail_image: imageUrls.news_detail_image,
           post_thumb: imageUrls.post_thumb,
@@ -179,7 +186,6 @@ module.exports = async (req, res) => {
       }
     }
 
-    // Remove duplicates based on topic
     const uniqueItems = newsItems.filter((item, index, self) => 
       index === self.findIndex(i => i.topic === item.topic)
     );
