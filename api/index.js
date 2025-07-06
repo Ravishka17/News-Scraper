@@ -23,20 +23,23 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
     console.log('Extracted elements:', elements);
 
     // Filter and clean paragraphs
-    const paragraphs = elements.filter(text => 
-      text && 
-      text.length > 0 && 
-      !text.includes('වැඩි විස්තර කියවන්න') && // Exclude "Read more details"
-      !text.match(/^\d{1,2}-\d{1,2}-\d{4}/) // Exclude date-like patterns
-    ).map(text => {
-      // Remove "COLOMBO (News 1st)" or "COLOMBO (News1st)" prefix if present
-      return text.replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '').trim();
-    }).filter(text => text.length > 0); // Ensure non-empty after cleaning
+    const paragraphs = elements
+      .filter(text => 
+        text && // Ensure text is not empty
+        text.length > 0 && // Ensure non-zero length
+        !text.includes('වැඩි විස්තර කියවන්න') && // Exclude "Read more details"
+        !text.match(/^\d{1,2}-\d{1,2}-\d{4}/) // Exclude date-like patterns
+      )
+      .map(text => {
+        // Remove "COLOMBO (News 1st)" or "COLOMBO (News1st)" prefix if present
+        return text.replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '').trim();
+      })
+      .filter(text => text.length > 0); // Ensure non-empty after cleaning
 
     // Log filtered paragraphs for debugging
     console.log('Filtered paragraphs:', paragraphs);
 
-    // Join paragraphs to form description
+    // Join paragraphs to form description, preserving all valid content
     let description = paragraphs.join(' ').trim();
     
     // Extract images with src attribute only
