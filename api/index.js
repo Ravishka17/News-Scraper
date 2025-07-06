@@ -30,46 +30,70 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
     
     const $ = cheerio.load(normalizedContent, { decodeEntities: false });
     
-    // Extract text from <h3> and <p> tags
-    const elements = $('h3, p').map((i, el) => {
+    // Extract ALL text content, not just from specific tags
+    // First, try to get structured content from h3 and p tags
+    const structuredElements = $('h3, p').map((i, el) => {
       const text = $(el).text().trim();
-      console.log(`Element ${i} (${el.tagName}):`, text); // Log each element
       return text;
     }).get();
     
-    // Log all extracted elements
-    console.log('Extracted elements:', elements);
+    // If no structured elements found, get all text content
+    let allTextContent = '';
+    if (structuredElements.length === 0 || structuredElements.join('').length < 50) {
+      // Remove script and style tags first
+      $('script, style').remove();
+      allTextContent = $('body').length > 0 ? $('body').text() : $.text();
+    }
+    
+    // Combine structured and unstructured content
+    const textSources = structuredElements.length > 0 ? structuredElements : [allTextContent];
+    
+    console.log('Text sources:', textSources);
 
-    // Filter and clean paragraphs
-    const paragraphs = elements
-      .filter((text, index) => {
-        const isValid = text && // Ensure text is not empty
-          text.length > 0 && // Ensure non-zero length
-          !text.includes('වැඩි විස්තර කියවන්න') && // Exclude "Read more details"
-          !text.match(/^\d{1,2}-\d{1,2}-\d{4}/); // Exclude date-like patterns
-        console.log(`Element ${index} valid:`, isValid, 'Text:', text); // Log filtering decision
-        return isValid;
-      })
-      .map((text, index) => {
-        // Remove "COLOMBO (News 1st)" or "COLOMBO (News1st)" prefix
-        const cleanedText = text.replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '').trim();
-        console.log(`Cleaned element ${index}:`, cleanedText); // Log cleaned text
+    // Process and clean all text content
+    const cleanedParagraphs = textSources
+      .map(text => {
+        if (!text || typeof text !== 'string') return '';
+        
+        // Remove "COLOMBO (News 1st)" or similar prefixes
+        let cleanedText = text.replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '').trim();
+        
+        // Remove "වැඩි විස්තර කියවන්න" (Read more details)
+        cleanedText = cleanedText.replace(/වැඩි\s*විස්තර\s*කියවන්න/g, '').trim();
+        
+        // Remove date patterns
+        cleanedText = cleanedText.replace(/^\d{1,2}-\d{1,2}-\d{4}/g, '').trim();
+        
+        // Remove extra whitespace
+        cleanedText = cleanedText.replace(/\s+/g, ' ').trim();
+        
         return cleanedText;
       })
-      .filter((text, index) => {
-        const isNonEmpty = text.length > 0;
-        console.log(`Final element ${index} included:`, isNonEmpty, 'Text:', text); // Log final inclusion
-        return isNonEmpty;
-      });
+      .filter(text => text && text.length > 0);
 
-    // Log filtered paragraphs
-    console.log('Filtered paragraphs:', paragraphs);
+    console.log('Cleaned paragraphs:', cleanedParagraphs);
 
-    // Join paragraphs to form description
-    let description = paragraphs.join(' ').trim();
+    // Join all paragraphs to form the complete description
+    let description = cleanedParagraphs.join(' ').trim();
+    
+    // If still no good description, try extracting from raw HTML
+    if (!description || description.length < 20) {
+      // Try to extract text from the raw HTML without cheerio parsing
+      const rawText = normalizedContent
+        .replace(/<[^>]*>/g, ' ') // Remove HTML tags
+        .replace(/\s+/g, ' ') // Normalize whitespace
+        .replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '') // Remove prefix
+        .replace(/වැඩි\s*විස්තර\s*කියවන්න/g, '') // Remove "Read more"
+        .trim();
+      
+      if (rawText.length > description.length) {
+        description = rawText;
+      }
+    }
     
     // Log final description
     console.log('Final description:', description);
+    console.log('Description length:', description.length);
 
     // Extract images with src attribute only
     const allImages = $('img[src]')
@@ -114,9 +138,7 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
 
     // Handle description fallback
     if (!description || description.length < 10) {
-      description = paragraphs.length > 0 
-        ? paragraphs.join(' ').trim()
-        : 'No detailed description available.';
+      description = 'No detailed description available.';
       if (uniqueAdditionalImages.length > 0) {
         description += ' See additional images for more details.';
       }
