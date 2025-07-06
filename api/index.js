@@ -18,79 +18,59 @@ const decodeUnicode = (str) => {
 // Helper function to extract description and additional images from content.rendered
 const extractContentData = (contentRendered, imageUrls = {}) => {
   try {
-    if (!contentRendered || typeof contentRendered !== 'string') {
-      console.log('No content.rendered found or invalid type');
-      return { 
-        description: 'No detailed description available.', 
-        additional_images: ['No additional images'] 
-      };
-    }
-
-    // Log raw content for debugging
-    console.log('Raw content.rendered:', contentRendered);
-    
-    // Decode Unicode escapes first
-    const decodedContent = decodeUnicode(contentRendered);
-    console.log('Decoded content:', decodedContent);
-    
-    // Extract text by removing HTML tags but preserve content structure
-    let description = decodedContent
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '') // Remove script tags
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '') // Remove style tags
-      .replace(/<[^>]*>/g, ' ') // Remove all other HTML tags
-      .replace(/\r\n/g, ' ') // Replace line breaks with spaces
-      .replace(/\s+/g, ' ') // Normalize whitespace
+    // Normalize content: decode Unicode escapes and remove extra newlines/whitespace
+    const normalizedContent = decodeUnicode(contentRendered)
+      .replace(/\r\n/g, ' ')
+      .replace(/\s+/g, ' ')
       .trim();
     
-    console.log('After HTML removal:', description);
-    console.log('Length after HTML removal:', description.length);
+    // Log raw and normalized content for debugging
+    console.log('Raw content.rendered:', contentRendered.substring(0, 200));
+    console.log('Normalized content.rendered:', normalizedContent.substring(0, 200));
     
-    // Only remove prefixes if description is long enough
-    if (description.length > 10) {
-      // Remove "COLOMBO (News 1st)" prefix only if it exists
-      const originalLength = description.length;
-      description = description.replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '').trim();
-      console.log('After prefix removal:', description);
-      console.log('Length changed from', originalLength, 'to', description.length);
-      
-      // Remove "වැඩි විස්තර කියවන්න" (Read more details)
-      description = description.replace(/වැඩි\s*විස්තර\s*කියවන්න/g, '').trim();
-      
-      // Remove date patterns at the beginning
-      description = description.replace(/^\d{1,2}-\d{1,2}-\d{4}/g, '').trim();
-      
-      // Final cleanup
-      description = description.replace(/\s+/g, ' ').trim();
-    }
+    const $ = cheerio.load(normalizedContent, { decodeEntities: false });
     
-    console.log('Final processed description:', description);
-    console.log('Final description length:', description.length);
+    // Extract text from <h3> and <p> tags
+    const elements = $('h3, p').map((i, el) => {
+      const text = $(el).text().trim();
+      console.log(`Element ${i} (${el.tagName}):`, text); // Log each element
+      return text;
+    }).get();
     
-    // If description is empty or too short, try alternative methods
-    if (!description || description.length < 5) {
-      console.log('Description too short, trying alternative extraction...');
-      
-      // Try using cheerio to parse the content
-      const $ = cheerio.load(decodedContent, { decodeEntities: false });
-      
-      // Try different selectors
-      const alternatives = [
-        $('h3').text() + ' ' + $('p').text(),
-        $.text(),
-        decodedContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-      ];
-      
-      for (const alt of alternatives) {
-        const cleaned = alt.replace(/\s+/g, ' ').trim();
-        console.log('Alternative attempt:', cleaned.substring(0, 100) + '...');
-        if (cleaned.length > description.length) {
-          description = cleaned;
-          break;
-        }
-      }
-    }
+    // Log all extracted elements
+    console.log('Extracted elements:', elements);
 
-        
+    // Filter and clean paragraphs
+    const paragraphs = elements
+      .filter((text, index) => {
+        const isValid = text && // Ensure text is not empty
+          text.length > 0 && // Ensure non-zero length
+          !text.includes('වැඩි විස්තර කියවන්න') && // Exclude "Read more details"
+          !text.match(/^\d{1,2}-\d{1,2}-\d{4}/); // Exclude date-like patterns
+        console.log(`Element ${index} valid:`, isValid, 'Text:', text); // Log filtering decision
+        return isValid;
+      })
+      .map((text, index) => {
+        // Remove "COLOMBO (News 1st)" or "COLOMBO (News1st)" prefix
+        const cleanedText = text.replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '').trim();
+        console.log(`Cleaned element ${index}:`, cleanedText); // Log cleaned text
+        return cleanedText;
+      })
+      .filter((text, index) => {
+        const isNonEmpty = text.length > 0;
+        console.log(`Final element ${index} included:`, isNonEmpty, 'Text:', text); // Log final inclusion
+        return isNonEmpty;
+      });
+
+    // Log filtered paragraphs
+    console.log('Filtered paragraphs:', paragraphs);
+
+    // Join paragraphs to form description
+    let description = paragraphs.join(' ').trim();
+    
+    // Log final description
+    console.log('Final description:', description);
+
     // Extract images with src attribute only
     const allImages = $('img[src]')
       .map((i, el) => {
@@ -134,7 +114,9 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
 
     // Handle description fallback
     if (!description || description.length < 10) {
-      description = 'No detailed description available.';
+      description = paragraphs.length > 0 
+        ? paragraphs.join(' ').trim()
+        : 'No detailed description available.';
       if (uniqueAdditionalImages.length > 0) {
         description += ' See additional images for more details.';
       }
