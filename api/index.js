@@ -3,7 +3,8 @@ const cheerio = require('cheerio');
 
 const API_URLS = {
   latest: 'https://apisinhala.newsfirst.lk/post/PostPagination/0/5',
-  local: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/81/0/5'
+  local: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/81/0/5',
+  sports: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/283/0/3'
 };
 
 // Helper function to extract description and additional images from content.rendered
@@ -127,7 +128,7 @@ module.exports = async (req, res) => {
         
         // Use correct image URLs from JSON data
         const imageUrls = item.images || {};
-        
+ chipmunk
         // Extract description and additional images from content.rendered
         const { description, additional_images } = extractContentData(item.content?.rendered || '', {
           news_detail_image: imageUrls.news_detail_image,
