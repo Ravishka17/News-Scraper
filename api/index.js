@@ -18,51 +18,76 @@ const decodeUnicode = (str) => {
 // Helper function to extract description and additional images from content.rendered
 const extractContentData = (contentRendered, imageUrls = {}) => {
   try {
-    // Normalize content: decode Unicode escapes first
-    const normalizedContent = decodeUnicode(contentRendered);
-    
+    if (!contentRendered || typeof contentRendered !== 'string') {
+      console.log('No content.rendered found or invalid type');
+      return { 
+        description: 'No detailed description available.', 
+        additional_images: ['No additional images'] 
+      };
+    }
+
     // Log raw content for debugging
     console.log('Raw content.rendered:', contentRendered);
-    console.log('Normalized content.rendered:', normalizedContent);
     
-    // First, try to extract text by simply removing HTML tags
-    let description = normalizedContent
-      .replace(/<[^>]*>/g, ' ') // Remove all HTML tags
+    // Decode Unicode escapes first
+    const decodedContent = decodeUnicode(contentRendered);
+    console.log('Decoded content:', decodedContent);
+    
+    // Extract text by removing HTML tags but preserve content structure
+    let description = decodedContent
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '') // Remove script tags
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '') // Remove style tags
+      .replace(/<[^>]*>/g, ' ') // Remove all other HTML tags
       .replace(/\r\n/g, ' ') // Replace line breaks with spaces
       .replace(/\s+/g, ' ') // Normalize whitespace
       .trim();
     
-    // Remove "COLOMBO (News 1st)" prefix
-    description = description.replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '').trim();
+    console.log('After HTML removal:', description);
+    console.log('Length after HTML removal:', description.length);
     
-    // Remove "වැඩි විස්තර කියවන්න" (Read more details)
-    description = description.replace(/වැඩි\s*විස්තර\s*කියවන්න/g, '').trim();
-    
-    // Remove date patterns at the beginning
-    description = description.replace(/^\d{1,2}-\d{1,2}-\d{4}/g, '').trim();
-    
-    // Clean up extra whitespace again
-    description = description.replace(/\s+/g, ' ').trim();
-    
-    console.log('Extracted description:', description);
-    console.log('Description length:', description.length);
-    
-    // If description is still too short, try with cheerio as fallback
-    if (!description || description.length < 20) {
-      console.log('Trying cheerio fallback...');
-      const $ = cheerio.load(normalizedContent, { decodeEntities: false });
+    // Only remove prefixes if description is long enough
+    if (description.length > 10) {
+      // Remove "COLOMBO (News 1st)" prefix only if it exists
+      const originalLength = description.length;
+      description = description.replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '').trim();
+      console.log('After prefix removal:', description);
+      console.log('Length changed from', originalLength, 'to', description.length);
       
-      // Extract all text content
-      const allText = $.text().trim();
+      // Remove "වැඩි විස්තර කියවන්න" (Read more details)
+      description = description.replace(/වැඩි\s*විස්තර\s*කියවන්න/g, '').trim();
       
-      // Clean the text
-      description = allText
-        .replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '')
-        .replace(/වැඩි\s*විස්තර\s*කියවන්න/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
+      // Remove date patterns at the beginning
+      description = description.replace(/^\d{1,2}-\d{1,2}-\d{4}/g, '').trim();
       
-      console.log('Cheerio fallback description:', description);
+      // Final cleanup
+      description = description.replace(/\s+/g, ' ').trim();
+    }
+    
+    console.log('Final processed description:', description);
+    console.log('Final description length:', description.length);
+    
+    // If description is empty or too short, try alternative methods
+    if (!description || description.length < 5) {
+      console.log('Description too short, trying alternative extraction...');
+      
+      // Try using cheerio to parse the content
+      const $ = cheerio.load(decodedContent, { decodeEntities: false });
+      
+      // Try different selectors
+      const alternatives = [
+        $('h3').text() + ' ' + $('p').text(),
+        $.text(),
+        decodedContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+      ];
+      
+      for (const alt of alternatives) {
+        const cleaned = alt.replace(/\s+/g, ' ').trim();
+        console.log('Alternative attempt:', cleaned.substring(0, 100) + '...');
+        if (cleaned.length > description.length) {
+          description = cleaned;
+          break;
+        }
+      }
     }
 
         
