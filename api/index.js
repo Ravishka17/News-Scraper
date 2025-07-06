@@ -18,83 +18,54 @@ const decodeUnicode = (str) => {
 // Helper function to extract description and additional images from content.rendered
 const extractContentData = (contentRendered, imageUrls = {}) => {
   try {
-    // Normalize content: decode Unicode escapes and remove extra newlines/whitespace
-    const normalizedContent = decodeUnicode(contentRendered)
-      .replace(/\r\n/g, ' ')
-      .replace(/\s+/g, ' ')
+    // Normalize content: decode Unicode escapes first
+    const normalizedContent = decodeUnicode(contentRendered);
+    
+    // Log raw content for debugging
+    console.log('Raw content.rendered:', contentRendered);
+    console.log('Normalized content.rendered:', normalizedContent);
+    
+    // First, try to extract text by simply removing HTML tags
+    let description = normalizedContent
+      .replace(/<[^>]*>/g, ' ') // Remove all HTML tags
+      .replace(/\r\n/g, ' ') // Replace line breaks with spaces
+      .replace(/\s+/g, ' ') // Normalize whitespace
       .trim();
     
-    // Log raw and normalized content for debugging
-    console.log('Raw content.rendered:', contentRendered.substring(0, 200));
-    console.log('Normalized content.rendered:', normalizedContent.substring(0, 200));
+    // Remove "COLOMBO (News 1st)" prefix
+    description = description.replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '').trim();
     
-    const $ = cheerio.load(normalizedContent, { decodeEntities: false });
+    // Remove "වැඩි විස්තර කියවන්න" (Read more details)
+    description = description.replace(/වැඩි\s*විස්තර\s*කියවන්න/g, '').trim();
     
-    // Extract ALL text content, not just from specific tags
-    // First, try to get structured content from h3 and p tags
-    const structuredElements = $('h3, p').map((i, el) => {
-      const text = $(el).text().trim();
-      return text;
-    }).get();
+    // Remove date patterns at the beginning
+    description = description.replace(/^\d{1,2}-\d{1,2}-\d{4}/g, '').trim();
     
-    // If no structured elements found, get all text content
-    let allTextContent = '';
-    if (structuredElements.length === 0 || structuredElements.join('').length < 50) {
-      // Remove script and style tags first
-      $('script, style').remove();
-      allTextContent = $('body').length > 0 ? $('body').text() : $.text();
-    }
+    // Clean up extra whitespace again
+    description = description.replace(/\s+/g, ' ').trim();
     
-    // Combine structured and unstructured content
-    const textSources = structuredElements.length > 0 ? structuredElements : [allTextContent];
+    console.log('Extracted description:', description);
+    console.log('Description length:', description.length);
     
-    console.log('Text sources:', textSources);
-
-    // Process and clean all text content
-    const cleanedParagraphs = textSources
-      .map(text => {
-        if (!text || typeof text !== 'string') return '';
-        
-        // Remove "COLOMBO (News 1st)" or similar prefixes
-        let cleanedText = text.replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '').trim();
-        
-        // Remove "වැඩි විස්තර කියවන්න" (Read more details)
-        cleanedText = cleanedText.replace(/වැඩි\s*විස්තර\s*කියවන්න/g, '').trim();
-        
-        // Remove date patterns
-        cleanedText = cleanedText.replace(/^\d{1,2}-\d{1,2}-\d{4}/g, '').trim();
-        
-        // Remove extra whitespace
-        cleanedText = cleanedText.replace(/\s+/g, ' ').trim();
-        
-        return cleanedText;
-      })
-      .filter(text => text && text.length > 0);
-
-    console.log('Cleaned paragraphs:', cleanedParagraphs);
-
-    // Join all paragraphs to form the complete description
-    let description = cleanedParagraphs.join(' ').trim();
-    
-    // If still no good description, try extracting from raw HTML
+    // If description is still too short, try with cheerio as fallback
     if (!description || description.length < 20) {
-      // Try to extract text from the raw HTML without cheerio parsing
-      const rawText = normalizedContent
-        .replace(/<[^>]*>/g, ' ') // Remove HTML tags
-        .replace(/\s+/g, ' ') // Normalize whitespace
-        .replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '') // Remove prefix
-        .replace(/වැඩි\s*විස්තර\s*කියවන්න/g, '') // Remove "Read more"
+      console.log('Trying cheerio fallback...');
+      const $ = cheerio.load(normalizedContent, { decodeEntities: false });
+      
+      // Extract all text content
+      const allText = $.text().trim();
+      
+      // Clean the text
+      description = allText
+        .replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '')
+        .replace(/වැඩි\s*විස්තර\s*කියවන්න/g, '')
+        .replace(/\s+/g, ' ')
         .trim();
       
-      if (rawText.length > description.length) {
-        description = rawText;
-      }
+      console.log('Cheerio fallback description:', description);
     }
-    
-    // Log final description
-    console.log('Final description:', description);
-    console.log('Description length:', description.length);
 
+        
     // Extract images with src attribute only
     const allImages = $('img[src]')
       .map((i, el) => {
