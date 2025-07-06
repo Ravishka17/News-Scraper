@@ -11,10 +11,14 @@ const API_URLS = {
 // Helper function to extract description and additional images from content.rendered
 const extractContentData = (contentRendered, imageUrls = {}) => {
   try {
-    const $ = cheerio.load(contentRendered);
+    // Normalize content by removing extra newlines and whitespace
+    const normalizedContent = contentRendered.replace(/\r\n/g, '').trim();
     
-    // Log the raw content.rendered for debugging
-    console.log('Raw content.rendered:', contentRendered.substring(0, 200)); // Log first 200 chars
+    // Log the raw and normalized content.rendered for debugging
+    console.log('Raw content.rendered:', contentRendered.substring(0, 200));
+    console.log('Normalized content.rendered:', normalizedContent.substring(0, 200));
+    
+    const $ = cheerio.load(normalizedContent);
     
     // Extract text from <h3> and <p> tags
     const elements = $('h3, p').map((i, el) => $(el).text().trim()).get();
@@ -28,7 +32,8 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
         text && // Ensure text is not empty
         text.length > 0 && // Ensure non-zero length
         !text.includes('වැඩි විස්තර කියවන්න') && // Exclude "Read more details"
-        !text.match(/^\d{1,2}-\d{1,2}-\d{4}/) // Exclude date-like patterns
+        !text.match(/^\d{1,2}-\d{1,2}-\d{4}/) && // Exclude date-like patterns
+        !text.match(/^\s*$/) // Exclude empty or whitespace-only strings
       )
       .map(text => {
         // Remove "COLOMBO (News 1st)" or "COLOMBO (News1st)" prefix if present
@@ -39,9 +44,12 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
     // Log filtered paragraphs for debugging
     console.log('Filtered paragraphs:', paragraphs);
 
-    // Join paragraphs to form description, preserving all valid content
+    // Join paragraphs to form description
     let description = paragraphs.join(' ').trim();
     
+    // Log final description
+    console.log('Final description:', description);
+
     // Extract images with src attribute only
     const allImages = $('img[src]')
       .map((i, el) => {
@@ -90,7 +98,7 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
     // Remove duplicates
     const uniqueAdditionalImages = [...new Set(additionalImages)];
 
-    // Handle description
+    // Handle description fallback
     if (!description || description.length < 10) {
       description = paragraphs.length > 0 
         ? paragraphs.join(' ').trim()
