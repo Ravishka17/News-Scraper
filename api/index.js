@@ -13,16 +13,20 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
   try {
     const $ = cheerio.load(contentRendered);
     
-    // Extract description from paragraphs, excluding unwanted text
+    // Log the raw content.rendered for debugging
+    console.log('Raw content.rendered:', contentRendered.substring(0, 200)); // Log first 200 chars
+    
+    // Extract description from paragraphs
     const paragraphs = $('p')
       .map((i, el) => $(el).text().trim())
       .get()
       .filter(text => text && 
-        text.length > 20 && 
         !text.includes('COLOMBO (News1st)') && 
         !text.includes('ශ්‍රී ලංකා ප්‍රවූත්ති') && 
-        !text.includes('වැඩි විස්තර කියවන්න') && 
-        !text.match(/^\d{1,2}-\d{1,2}-\d{4}/));
+        !text.includes('වැඩි විස්තර කියවන්න'));
+
+    // Log filtered paragraphs for debugging
+    console.log('Filtered paragraphs:', paragraphs);
 
     let description = paragraphs.join(' ').trim();
     
@@ -75,7 +79,7 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
     const uniqueAdditionalImages = [...new Set(additionalImages)];
 
     // Handle description
-    if (!description || description.length < 50 || description.includes('අදාළ නිවේදනය පහතින් දැක්වේ')) {
+    if (!description || description.length < 10 || description.includes('අදාළ නිවේදනය පහතින් දැක්වේ')) {
       description = paragraphs.length > 0 
         ? paragraphs.join(' ').trim()
         : 'No detailed description available.';
