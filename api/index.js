@@ -33,9 +33,9 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
 
     const $ = cheerio.load(normalizedContent, { decodeEntities: false });
 
-    // Extract text from <h3> and <p> tags
+    // Extract text from <h3> and <p> tags, stripping HTML tags
     let elements = $('h3, p').map((i, el) => {
-      const text = $(el).text().trim();
+      const text = $(el).text().trim(); // Extract text without HTML tags
       console.log(`Element ${i} (${el.tagName}):`, text);
       return text;
     }).get();
@@ -43,7 +43,9 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
     // If no or few elements are found, split by newlines as fallback
     if (elements.length <= 1) {
       console.log('Falling back to newline splitting due to insufficient HTML tags');
-      elements = normalizedContent
+      // Strip all HTML tags from normalized content before splitting
+      const cleanText = $.text().trim();
+      elements = cleanText
         .split('\n')
         .map(text => text.trim())
         .filter(text => text.length > 0);
