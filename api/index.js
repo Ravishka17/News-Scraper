@@ -20,25 +20,36 @@ const decodeUnicode = (str) => {
 // Helper function to extract description and additional images from content.rendered
 const extractContentData = (contentRendered, imageUrls = {}) => {
   try {
-    // Normalize content: decode Unicode escapes and remove extra newlines/whitespace
+    // Normalize content: decode Unicode escapes and handle line breaks
     const normalizedContent = decodeUnicode(contentRendered)
-      .replace(/\r\n/g, ' ')
-      .replace(/\s+/g, ' ')
+      .replace(/\r\n\s*\r\n/g, '\n') // Replace multiple line breaks with single
+      .replace(/\r\n/g, '\n') // Replace \r\n with \n
+      .replace(/\s+/g, ' ') // Normalize spaces
       .trim();
-    
+
     // Log raw and normalized content for debugging
     console.log('Raw content.rendered:', contentRendered.substring(0, 200));
     console.log('Normalized content.rendered:', normalizedContent.substring(0, 200));
-    
+
     const $ = cheerio.load(normalizedContent, { decodeEntities: false });
-    
+
     // Extract text from <h3> and <p> tags
-    const elements = $('h3, p').map((i, el) => {
+    let elements = $('h3, p').map((i, el) => {
       const text = $(el).text().trim();
-      console.log(`Element ${i} (${el.tagName}):`, text); // Log each element
+      console.log(`Element ${i} (${el.tagName}):`, text);
       return text;
     }).get();
-    
+
+    // If no or few elements are found, split by newlines as fallback
+    if (elements.length <= 1) {
+      console.log('Falling back to newline splitting due to insufficient HTML tags');
+      elements = normalizedContent
+        .split('\n')
+        .map(text => text.trim())
+        .filter(text => text.length > 0);
+      console.log('Elements from newline split:', elements);
+    }
+
     // Log all extracted elements
     console.log('Extracted elements:', elements);
 
@@ -49,18 +60,18 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
           text.length > 0 && // Ensure non-zero length
           !text.includes('වැඩි විස්තර කියවන්න') && // Exclude "Read more details"
           !text.match(/^\d{1,2}-\d{1,2}-\d{4}/); // Exclude date-like patterns
-        console.log(`Element ${index} valid:`, isValid, 'Text:', text); // Log filtering decision
+        console.log(`Element ${index} valid:`, isValid, 'Text:', text);
         return isValid;
       })
       .map((text, index) => {
-        // Remove "COLOMBO (News 1st)" or "COLOMBO (News1st)" prefix
+        // Remove "COLOMBO (News 1st)" or similar prefixes
         const cleanedText = text.replace(/^(COLOMBO\s*\(News\s*1st\)\s*[-–]?\s*)/i, '').trim();
-        console.log(`Cleaned element ${index}:`, cleanedText); // Log cleaned text
+        console.log(`Cleaned element ${index}:`, cleanedText);
         return cleanedText;
       })
       .filter((text, index) => {
         const isNonEmpty = text.length > 0;
-        console.log(`Final element ${index} included:`, isNonEmpty, 'Text:', text); // Log final inclusion
+        console.log(`Final element ${index} included:`, isNonEmpty, 'Text:', text);
         return isNonEmpty;
       });
 
@@ -69,7 +80,7 @@ const extractContentData = (contentRendered, imageUrls = {}) => {
 
     // Join paragraphs to form description
     let description = paragraphs.join(' ').trim();
-    
+
     // Log final description
     console.log('Final description:', description);
 
