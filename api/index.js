@@ -6,7 +6,7 @@ const API_URLS = {
   local: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/81/0/5',
   sports: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/283/0/3',
   featured: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/36569/0/5',
-  world: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/84/1/5',
+  world: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/84/0/5',
   business: 'https://apisinhala.newsfirst.lk/post/categoryPostPagination/85/0/5'
 };
 
